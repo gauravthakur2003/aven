@@ -1,0 +1,168 @@
+name: Daily Deploy — Test → Staging → Main → Railway
+
+on:
+  # Runs every day at 11 PM Eastern Time (04:00 UTC)
+  schedule:
+    - cron: '0 4 * * *'
+
+  # Also allows manual trigger from GitHub Actions tab
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: 'Skip tests and force deploy (emergency only)'
+        required: false
+        default: 'false'
+
+jobs:
+  # ─────────────────────────────────────────────────────────
+  # JOB 1: Run full test suite on dev
+  # ─────────────────────────────────────────────────────────
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout dev branch
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            packages/normaliser/package-lock.json
+            packages/dashboard/package-lock.json
+
+      - name: Install normaliser dependencies
+        working-directory: packages/normaliser
+        run: npm ci
+
+      - name: Install dashboard dependencies
+        working-directory: packages/dashboard
+        run: npm ci
+
+      - name: Run normaliser tests
+        working-directory: packages/normaliser
+        run: npm test -- --forceExit --passWithNoTests
+        env:
+          NODE_ENV: test
+
+      - name: Run dashboard tests
+        working-directory: packages/dashboard
+        run: npm test -- --forceExit --passWithNoTests
+        env:
+          NODE_ENV: test
+
+  # ─────────────────────────────────────────────────────────
+  # JOB 2: Merge dev → staging (only if tests pass)
+  # ─────────────────────────────────────────────────────────
+  promote-to-staging:
+    name: Promote dev → staging
+    needs: test
+    if: success() || github.event.inputs.skip_tests == 'true'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name  "Aven Bot"
+          git config user.email "bot@aven.ca"
+
+      - name: Merge dev into staging
+        run: |
+          git checkout staging
+          git merge origin/dev --no-ff -m "chore: promote dev → staging [$(date '+%Y-%m-%d')]"
+          git push origin staging
+
+  # ─────────────────────────────────────────────────────────
+  # JOB 3: Run tests again on staging
+  # ─────────────────────────────────────────────────────────
+  test-staging:
+    name: Test Staging
+    needs: promote-to-staging
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout staging branch
+        uses: actions/checkout@v4
+        with:
+          ref: staging
+          fetch-depth: 0
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install normaliser dependencies
+        working-directory: packages/normaliser
+        run: npm ci
+
+      - name: Install dashboard dependencies
+        working-directory: packages/dashboard
+        run: npm ci
+
+      - name: Run normaliser tests on staging
+        working-directory: packages/normaliser
+        run: npm test -- --forceExit --passWithNoTests
+        env:
+          NODE_ENV: test
+
+      - name: Run dashboard tests on staging
+        working-directory: packages/dashboard
+        run: npm test -- --forceExit --passWithNoTests
+        env:
+          NODE_ENV: test
+
+  # ─────────────────────────────────────────────────────────
+  # JOB 4: Merge staging → main and deploy to Railway
+  # ─────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy staging → main → Railway
+    needs: test-staging
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name  "Aven Bot"
+          git config user.email "bot@aven.ca"
+
+      - name: Merge staging into main
+        run: |
+          git checkout main
+          git merge origin/staging --no-ff -m "chore: release staging → main [$(date '+%Y-%m-%d')]"
+          git push origin main
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Railway
+        working-directory: packages/dashboard
+        run: railway up --detach
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+      - name: Confirm deployment
+        run: echo "✅ Deployed to https://aven-dashboard-production.up.railway.app"
