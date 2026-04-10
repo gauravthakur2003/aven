@@ -1,0 +1,33 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "Dashboard",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["ts-node", "server.ts"],
+      "cwd": "/Users/gauravthakur/Documents/aven/packages/dashboard",
+      "port": 3030
+    },
+    {
+      "name": "Pipeline (Kijiji + FB → Normaliser)",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["ts-node", "test-pipeline.ts"],
+      "cwd": "/Users/gauravthakur/Documents/aven/packages/normaliser",
+      "port": null
+    },
+    {
+      "name": "Scraper (M1)",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["ts-node", "src/index.ts"],
+      "cwd": "/Users/gauravthakur/Documents/aven/packages/scraper",
+      "port": 9090
+    },
+    {
+      "name": "Normaliser (M2 worker)",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["ts-node", "src/index.ts"],
+      "cwd": "/Users/gauravthakur/Documents/aven/packages/normaliser",
+      "port": null
+    }
+  ]
+}

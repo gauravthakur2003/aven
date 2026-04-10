@@ -1,0 +1,96 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: aven-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes --maxmemory 4gb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  scraper-kijiji:
+    build:
+      context: ./packages/scraper
+      dockerfile: Dockerfile
+    container_name: aven-scraper-kijiji
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - CONNECTOR_ID=kijiji-ca
+      - HEALTH_MONITOR_PORT=9091
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 512m
+
+  scraper-facebook:
+    build:
+      context: ./packages/scraper
+      dockerfile: Dockerfile
+    container_name: aven-scraper-facebook
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - CONNECTOR_ID=facebook-mp-ca
+      - HEALTH_MONITOR_PORT=9092
+      - BRIGHTDATA_HOST=${BRIGHTDATA_HOST}
+      - BRIGHTDATA_PORT=${BRIGHTDATA_PORT}
+      - BRIGHTDATA_USERNAME=${BRIGHTDATA_USERNAME}
+      - BRIGHTDATA_PASSWORD=${BRIGHTDATA_PASSWORD}
+      - FB_ACCOUNT_COOKIE=${FB_ACCOUNT_COOKIE}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 2g
+    shm_size: 1g
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: aven-postgres
+    environment:
+      POSTGRES_DB:       aven_dev
+      POSTGRES_USER:     aven
+      POSTGRES_PASSWORD: aven_local_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - aven_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aven -d aven_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  normaliser:
+    build:
+      context: ./packages/normaliser
+      dockerfile: Dockerfile
+    container_name: aven-normaliser
+    environment:
+      - NODE_ENV=production
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://aven:aven_local_dev@postgres:5432/aven_dev
+      - LLM_PROVIDER=anthropic
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - WORKER_COUNT=2
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 512m
+
+volumes:
+  redis_data:
+  aven_pgdata:

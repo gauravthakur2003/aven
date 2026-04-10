@@ -1,0 +1,1442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AVEN — How It Works</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: #F5F6FA;
+      color: #1a1a2e;
+      min-height: 100vh;
+    }
+
+    /* ─── HEADER ─── */
+    .page-header {
+      background: #fff;
+      border-bottom: 1px solid #E8EAF0;
+      padding: 28px 48px;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    .page-header .header-left h1 {
+      font-size: 22px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      color: #1565C0;
+    }
+    .page-header .header-left p {
+      font-size: 13px;
+      color: #6B7280;
+      margin-top: 4px;
+      max-width: 540px;
+    }
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: #1565C0;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      background: #E3F2FD;
+      padding: 8px 16px;
+      border-radius: 8px;
+      transition: background 0.15s;
+      white-space: nowrap;
+    }
+    .back-link:hover { background: #BBDEFB; }
+
+    /* ─── PAGE BODY ─── */
+    .page-body {
+      padding: 40px 48px;
+      max-width: 1600px;
+      margin: 0 auto;
+    }
+
+    /* ─── SECTION WRAPPER ─── */
+    .section-card {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+      margin-bottom: 40px;
+      overflow: hidden;
+    }
+    .section-card-header {
+      padding: 24px 32px;
+      border-bottom: 1px solid #F0F1F5;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .section-badge {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding: 5px 12px;
+      border-radius: 6px;
+    }
+    .badge-blue   { background: #E3F2FD; color: #1565C0; }
+    .badge-green  { background: #E8F5E9; color: #2E7D32; }
+    .badge-orange { background: #FFF3E0; color: #E65100; }
+    .badge-purple { background: #F3E5F5; color: #6A1B9A; }
+    .badge-red    { background: #FFEBEE; color: #C62828; }
+    .badge-teal   { background: #E0F2F1; color: #00695C; }
+    .badge-gray   { background: #ECEFF1; color: #455A64; }
+
+    .section-card-header .section-title {
+      font-size: 18px;
+      font-weight: 700;
+      color: #111827;
+    }
+    .section-card-header .section-subtitle {
+      font-size: 13px;
+      color: #6B7280;
+      margin-top: 2px;
+    }
+    .section-card-body {
+      padding: 32px;
+    }
+
+    /* ─── PLAIN ENGLISH BLOCK ─── */
+    .plain-english {
+      background: #F0FDF4;
+      border-left: 4px solid #2E7D32;
+      border-radius: 0 8px 8px 0;
+      padding: 16px 20px;
+      margin-bottom: 32px;
+    }
+    .plain-english .pe-label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #2E7D32;
+      margin-bottom: 6px;
+    }
+    .plain-english p {
+      font-size: 14px;
+      color: #374151;
+      line-height: 1.6;
+    }
+
+    /* ─── FLOW NODES ─── */
+    .flow-node {
+      border-radius: 10px;
+      padding: 12px 16px;
+      min-width: 140px;
+      max-width: 200px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      flex-shrink: 0;
+    }
+    .flow-node .node-title {
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.3;
+    }
+    .flow-node .node-desc {
+      font-size: 11px;
+      color: #555;
+      margin-top: 4px;
+      line-height: 1.4;
+    }
+
+    .node-blue   { background: #E3F2FD; border: 2px solid #1565C0; }
+    .node-blue .node-title { color: #1565C0; }
+    .node-green  { background: #E8F5E9; border: 2px solid #2E7D32; }
+    .node-green .node-title { color: #2E7D32; }
+    .node-orange { background: #FFF3E0; border: 2px solid #E65100; }
+    .node-orange .node-title { color: #E65100; }
+    .node-purple { background: #F3E5F5; border: 2px solid #6A1B9A; }
+    .node-purple .node-title { color: #6A1B9A; }
+    .node-red    { background: #FFEBEE; border: 2px solid #C62828; }
+    .node-red .node-title { color: #C62828; }
+    .node-teal   { background: #E0F2F1; border: 2px solid #00695C; }
+    .node-teal .node-title { color: #00695C; }
+
+    /* ─── DIAMOND (DECISION) ─── */
+    .diamond-wrap {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex-shrink: 0;
+    }
+    .diamond {
+      width: 64px;
+      height: 64px;
+      background: #fff;
+      border: 2px solid #455A64;
+      transform: rotate(45deg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+    }
+    .diamond-label {
+      transform: rotate(-45deg);
+      font-size: 10px;
+      font-weight: 700;
+      color: #455A64;
+      text-align: center;
+      line-height: 1.2;
+      padding: 4px;
+    }
+    .diamond-wrap .diamond-caption {
+      font-size: 11px;
+      color: #6B7280;
+      margin-top: 8px;
+      text-align: center;
+    }
+
+    /* ─── ARROWS ─── */
+    .arrow {
+      display: flex;
+      align-items: center;
+      color: #9CA3AF;
+      font-size: 22px;
+      padding: 0 4px;
+      flex-shrink: 0;
+      align-self: center;
+    }
+    .arrow-down {
+      display: flex;
+      justify-content: center;
+      color: #9CA3AF;
+      font-size: 22px;
+      margin: 4px 0;
+    }
+
+    /* ─── FLOW ROW ─── */
+    .flow-row {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+    }
+    .flow-col {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+    }
+
+    /* ─────────────────────────────────────────
+       UNIFIED DIAGRAM
+    ───────────────────────────────────────── */
+    .unified-scroll-wrapper {
+      overflow-x: auto;
+      overflow-y: visible;
+      padding-bottom: 8px;
+    }
+    .unified-canvas {
+      min-width: 1500px;
+      padding: 8px 0 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    /* Swim lane */
+    .swim-lane {
+      display: flex;
+      align-items: stretch;
+      border-top: 1px solid #E8EAF0;
+    }
+    .swim-lane:last-child {
+      border-bottom: 1px solid #E8EAF0;
+    }
+    .lane-label {
+      width: 180px;
+      min-width: 180px;
+      padding: 24px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-right: 2px solid #E8EAF0;
+      background: #FAFBFC;
+    }
+    .lane-label-text {
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: #374151;
+    }
+    .lane-label-num {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      font-size: 12px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 8px;
+    }
+    .lane-content {
+      flex: 1;
+      padding: 24px 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    /* Unified node (slightly compact) */
+    .u-node {
+      border-radius: 10px;
+      padding: 10px 14px;
+      min-width: 130px;
+      max-width: 190px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      flex-shrink: 0;
+    }
+    .u-node .u-title {
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.3;
+    }
+    .u-node .u-desc {
+      font-size: 10px;
+      color: #555;
+      margin-top: 3px;
+      line-height: 1.4;
+    }
+
+    .u-blue   { background: #E3F2FD; border: 2px solid #1565C0; }
+    .u-blue .u-title { color: #1565C0; }
+    .u-green  { background: #E8F5E9; border: 2px solid #2E7D32; }
+    .u-green .u-title { color: #2E7D32; }
+    .u-orange { background: #FFF3E0; border: 2px solid #E65100; }
+    .u-orange .u-title { color: #E65100; }
+    .u-purple { background: #F3E5F5; border: 2px solid #6A1B9A; }
+    .u-purple .u-title { color: #6A1B9A; }
+    .u-red    { background: #FFEBEE; border: 2px solid #C62828; }
+    .u-red .u-title { color: #C62828; }
+    .u-teal   { background: #E0F2F1; border: 2px solid #00695C; }
+    .u-teal .u-title { color: #00695C; }
+    .u-gray   { background: #ECEFF1; border: 2px solid #455A64; }
+    .u-gray .u-title { color: #455A64; }
+
+    .u-row {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      flex-wrap: nowrap;
+    }
+    .u-arrow {
+      color: #9CA3AF;
+      font-size: 20px;
+      padding: 0 6px;
+      flex-shrink: 0;
+    }
+    .u-col {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    /* Unified diamond */
+    .u-diamond-wrap {
+      display: flex;
+      align-items: center;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    .u-diamond {
+      width: 56px;
+      height: 56px;
+      background: #fff;
+      border: 2px solid #455A64;
+      transform: rotate(45deg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+    }
+    .u-diamond-text {
+      transform: rotate(-45deg);
+      font-size: 9px;
+      font-weight: 700;
+      color: #455A64;
+      text-align: center;
+      line-height: 1.2;
+    }
+
+    /* Branch boxes in unified */
+    .u-branch {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      align-items: flex-start;
+    }
+    .u-branch-row {
+      display: flex;
+      align-items: center;
+      gap: 0;
+    }
+    .u-branch-label {
+      font-size: 10px;
+      color: #6B7280;
+      font-weight: 600;
+      padding: 0 6px;
+      flex-shrink: 0;
+    }
+
+    /* ─── M2 CONVEYOR BELT ─── */
+    .conveyor {
+      display: flex;
+      align-items: stretch;
+      gap: 0;
+      border: 2px solid #E8EAF0;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .conveyor-step {
+      flex: 1;
+      padding: 16px 14px;
+      border-right: 2px solid #E8EAF0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .conveyor-step:last-child { border-right: none; }
+    .conveyor-step-num {
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      color: #9CA3AF;
+    }
+    .conveyor-step-title {
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .conveyor-step-desc {
+      font-size: 12px;
+      color: #555;
+      line-height: 1.5;
+    }
+    .step-orange { background: #FFF3E0; }
+    .step-orange .conveyor-step-title { color: #E65100; }
+    .step-purple { background: #F3E5F5; }
+    .step-purple .conveyor-step-title { color: #6A1B9A; }
+    .step-teal   { background: #E0F2F1; }
+    .step-teal .conveyor-step-title   { color: #00695C; }
+
+    /* ─── DATABASE CARDS ─── */
+    .db-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+    .db-card {
+      background: #FFEBEE;
+      border: 2px solid #C62828;
+      border-radius: 10px;
+      padding: 20px;
+    }
+    .db-card .db-table-name {
+      font-size: 16px;
+      font-weight: 700;
+      color: #C62828;
+      font-family: 'Courier New', monospace;
+      margin-bottom: 8px;
+    }
+    .db-card .db-count {
+      font-size: 12px;
+      font-weight: 600;
+      color: #C62828;
+      background: #fff;
+      border-radius: 4px;
+      padding: 2px 8px;
+      display: inline-block;
+      margin-bottom: 10px;
+    }
+    .db-card .db-desc {
+      font-size: 13px;
+      color: #555;
+      line-height: 1.5;
+    }
+    .db-field {
+      font-size: 11px;
+      color: #374151;
+      background: rgba(255,255,255,0.7);
+      border-radius: 4px;
+      padding: 3px 8px;
+      margin-top: 4px;
+      font-family: 'Courier New', monospace;
+    }
+
+    /* ─── DASHBOARD ROUTES ─── */
+    .routes-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+    .routes-panel {
+      border-radius: 10px;
+      padding: 20px;
+      border: 2px solid;
+    }
+    .routes-panel.admin {
+      background: #1E293B;
+      border-color: #334155;
+    }
+    .routes-panel.consumer {
+      background: #E0F2F1;
+      border-color: #00695C;
+    }
+    .routes-panel-title {
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 14px;
+    }
+    .routes-panel.admin .routes-panel-title { color: #94A3B8; }
+    .routes-panel.consumer .routes-panel-title { color: #00695C; }
+    .route-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    .route-path {
+      font-size: 12px;
+      font-family: 'Courier New', monospace;
+      font-weight: 700;
+      padding: 3px 8px;
+      border-radius: 4px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .routes-panel.admin .route-path {
+      background: #334155;
+      color: #60A5FA;
+    }
+    .routes-panel.consumer .route-path {
+      background: #B2DFDB;
+      color: #00695C;
+    }
+    .route-desc {
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .routes-panel.admin .route-desc { color: #94A3B8; }
+    .routes-panel.consumer .route-desc { color: #374151; }
+
+    /* ─── TECH STACK ─── */
+    .tech-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 16px;
+    }
+    .tech-card {
+      background: #F8FAFC;
+      border: 1px solid #E2E8F0;
+      border-radius: 10px;
+      padding: 16px;
+    }
+    .tech-card .tech-category {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: #9CA3AF;
+      margin-bottom: 6px;
+    }
+    .tech-card .tech-name {
+      font-size: 15px;
+      font-weight: 700;
+      color: #1a1a2e;
+      margin-bottom: 4px;
+    }
+    .tech-card .tech-desc {
+      font-size: 12px;
+      color: #6B7280;
+      line-height: 1.4;
+    }
+
+    /* ─── SCORE ROUTING ─── */
+    .score-routing {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      margin-top: 24px;
+      flex-wrap: wrap;
+    }
+    .score-outcome {
+      border-radius: 8px;
+      padding: 12px 16px;
+      text-align: center;
+      min-width: 130px;
+    }
+    .outcome-published { background: #E8F5E9; border: 2px solid #2E7D32; }
+    .outcome-published .out-title { color: #2E7D32; }
+    .outcome-review    { background: #FFF3E0; border: 2px solid #E65100; }
+    .outcome-review .out-title    { color: #E65100; }
+    .outcome-rejected  { background: #FFEBEE; border: 2px solid #C62828; }
+    .outcome-rejected .out-title  { color: #C62828; }
+    .out-title { font-size: 13px; font-weight: 700; }
+    .out-range { font-size: 11px; color: #6B7280; margin-top: 3px; }
+
+    /* ─── LEGEND ─── */
+    .legend {
+      display: flex;
+      gap: 20px;
+      flex-wrap: wrap;
+      padding: 16px 32px;
+      background: #F8FAFC;
+      border-top: 1px solid #F0F1F5;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: #374151;
+    }
+    .legend-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+
+    /* responsive */
+    @media (max-width: 900px) {
+      .page-header { padding: 16px 20px; }
+      .page-body { padding: 20px; }
+      .db-grid { grid-template-columns: 1fr; }
+      .routes-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════
+     HEADER
+════════════════════════════════════════════ -->
+<header class="page-header">
+  <div class="header-left">
+    <h1>AVEN — How It Works</h1>
+    <p>A complete walkthrough of the platform — from scraping to showing you the perfect car</p>
+  </div>
+  <a href="/" class="back-link">← Back to Dashboard</a>
+</header>
+
+<div class="page-body">
+
+  <!-- ═══════════════════════════════════════════
+       SECTION 0 — UNIFIED SYSTEM DIAGRAM
+  ════════════════════════════════════════════ -->
+  <div class="section-card">
+    <div class="section-card-header">
+      <span class="section-badge badge-gray">Full System</span>
+      <div>
+        <div class="section-title">The Complete Picture</div>
+        <div class="section-subtitle">Every component, every data flow — end to end</div>
+      </div>
+    </div>
+
+    <!-- Legend -->
+    <div class="legend">
+      <div class="legend-item"><div class="legend-dot" style="background:#1565C0;"></div> Data Source</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#2E7D32;"></div> Scraper / Action</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#E65100;"></div> AI / LLM</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#6A1B9A;"></div> Pipeline Step</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#C62828;"></div> Database</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#00695C;"></div> Dashboard / Output</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#fff; border:1.5px solid #455A64;"></div> Decision</div>
+    </div>
+
+    <div class="section-card-body">
+      <div class="unified-scroll-wrapper">
+        <div class="unified-canvas">
+
+          <!-- ── SWIM LANE 1: Finding the Cars ── -->
+          <div class="swim-lane">
+            <div class="lane-label">
+              <div class="u-col" style="align-items:center;">
+                <div class="lane-label-num" style="background:#E3F2FD; color:#1565C0;">1</div>
+                <span class="lane-label-text" style="color:#1565C0;">Finding the Cars</span>
+              </div>
+            </div>
+            <div class="lane-content">
+
+              <!-- Kijiji row -->
+              <div class="u-row" style="align-items:center;">
+                <div class="u-node u-blue">
+                  <div class="u-title">Kijiji.ca</div>
+                  <div class="u-desc">Public listings website</div>
+                </div>
+                <span class="u-arrow">→</span>
+                <div class="u-node u-green">
+                  <div class="u-title">Kijiji Scraper</div>
+                  <div class="u-desc">6 GTA regions, HTTP polling</div>
+                </div>
+                <span class="u-arrow">→</span>
+                <div class="u-node u-green" style="min-width:160px;">
+                  <div class="u-title">Parse Listings</div>
+                  <div class="u-desc">Extract title, price, URL, ID</div>
+                </div>
+                <span class="u-arrow">→</span>
+                <div class="u-diamond-wrap">
+                  <div class="u-diamond"><span class="u-diamond-text">Already seen?</span></div>
+                </div>
+                <span class="u-arrow">No →</span>
+                <div class="u-node u-orange">
+                  <div class="u-title">Add to Queue</div>
+                  <div class="u-desc">Waits for AI worker</div>
+                </div>
+                <span class="u-arrow">→</span>
+                <div class="u-node u-gray" style="min-width:150px;">
+                  <div class="u-title">Queue (≤500)</div>
+                  <div class="u-desc">Pending listings buffer</div>
+                </div>
+              </div>
+
+              <!-- Facebook row -->
+              <div class="u-row" style="align-items:center;">
+                <div class="u-node u-blue">
+                  <div class="u-title">Facebook MP</div>
+                  <div class="u-desc">Marketplace listings</div>
+                </div>
+                <span class="u-arrow">→</span>
+                <div class="u-node u-green">
+                  <div class="u-title">FB Scraper</div>
+                  <div class="u-desc">40 city/price combos, real Chrome</div>
+                </div>
+                <span class="u-arrow">→</span>
+                <div class="u-node u-green" style="min-width:160px;">
+                  <div class="u-title">Intercept API calls</div>
+                  <div class="u-desc">Collect data as FB loads it</div>
+                </div>
+                <span class="u-arrow">→</span>
+                <div class="u-diamond-wrap">
+                  <div class="u-diamond"><span class="u-diamond-text">Full data?</span></div>
+                </div>
+                <div class="u-col" style="margin-left:0;">
+                  <div class="u-branch-row">
+                    <span class="u-branch-label">Yes →</span>
+                    <div class="u-node u-orange" style="min-width:100px;">
+                      <div class="u-title">Grab instantly</div>
+                    </div>
+                  </div>
+                  <div class="u-branch-row" style="margin-top:6px;">
+                    <span class="u-branch-label">No →</span>
+                    <div class="u-node u-green" style="min-width:100px;">
+                      <div class="u-title">Visit detail page</div>
+                    </div>
+                  </div>
+                </div>
+                <span class="u-arrow">→</span>
+                <div class="u-node u-orange">
+                  <div class="u-title">Add to Queue</div>
+                  <div class="u-desc">Same buffer as Kijiji</div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- ── SWIM LANE 2: Understanding Each Listing ── -->
+          <div class="swim-lane">
+            <div class="lane-label">
+              <div class="u-col" style="align-items:center;">
+                <div class="lane-label-num" style="background:#FFF3E0; color:#E65100;">2</div>
+                <span class="lane-label-text" style="color:#E65100;">Understanding Each Listing</span>
+              </div>
+            </div>
+            <div class="lane-content">
+
+              <!-- Workers -->
+              <div class="u-row" style="align-items:center; flex-wrap:wrap; gap:8px 0;">
+                <div class="u-node u-gray">
+                  <div class="u-title">Queue</div>
+                  <div class="u-desc">Up to 500 waiting</div>
+                </div>
+                <span class="u-arrow">→</span>
+                <div class="u-col" style="gap:6px;">
+                  <div class="u-node u-orange" style="min-width:150px;">
+                    <div class="u-title">Worker 1 — Cerebras</div>
+                    <div class="u-desc">Llama 3.1 70B, ultra-fast</div>
+                  </div>
+                  <div class="u-node u-orange" style="min-width:150px;">
+                    <div class="u-title">Worker 2 — Groq</div>
+                    <div class="u-desc">Llama 3.1 70B, fast inference</div>
+                  </div>
+                  <div class="u-node u-orange" style="min-width:150px;">
+                    <div class="u-title">Worker 3 — Gemini</div>
+                    <div class="u-desc">Flash 2.0, Google AI</div>
+                  </div>
+                </div>
+                <span class="u-arrow">→</span>
+
+                <!-- Extract + branch -->
+                <div class="u-col" style="gap:6px;">
+                  <div class="u-node u-purple" style="min-width:140px;">
+                    <div class="u-title">Extract Fields</div>
+                    <div class="u-desc">make/model/year/price/mileage</div>
+                  </div>
+                  <div class="u-row" style="align-items:center;">
+                    <div class="u-diamond-wrap">
+                      <div class="u-diamond"><span class="u-diamond-text">Kijiji structured?</span></div>
+                    </div>
+                    <div class="u-col" style="margin-left:4px; gap:6px;">
+                      <div class="u-branch-row">
+                        <span class="u-branch-label">Yes →</span>
+                        <div class="u-node u-teal" style="min-width:110px;">
+                          <div class="u-title">Instant (0ms)</div>
+                          <div class="u-desc">No AI needed</div>
+                        </div>
+                      </div>
+                      <div class="u-branch-row">
+                        <span class="u-branch-label">No →</span>
+                        <div class="u-node u-orange" style="min-width:110px;">
+                          <div class="u-title">AI reads listing</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <span class="u-arrow">→</span>
+                <div class="u-col" style="gap:6px;">
+                  <div class="u-node u-purple">
+                    <div class="u-title">Validate &amp; Clean</div>
+                    <div class="u-desc">Fix naming, check year</div>
+                  </div>
+                  <div class="u-node u-purple">
+                    <div class="u-title">Vision: Colour</div>
+                    <div class="u-desc">Guess from photo</div>
+                  </div>
+                  <div class="u-node u-purple">
+                    <div class="u-title">CARFAX Lookup</div>
+                    <div class="u-desc">Accidents, owners, liens</div>
+                  </div>
+                  <div class="u-node u-orange">
+                    <div class="u-title">Redact PII</div>
+                    <div class="u-desc">Strip phone/email</div>
+                  </div>
+                </div>
+
+                <span class="u-arrow">→</span>
+                <div class="u-col" style="gap:6px;">
+                  <div class="u-node u-orange">
+                    <div class="u-title">Score 0–100</div>
+                    <div class="u-desc">Missing fields = –8 pts each</div>
+                  </div>
+                  <div class="u-diamond-wrap" style="margin-top:4px;">
+                    <div class="u-diamond"><span class="u-diamond-text">Score?</span></div>
+                  </div>
+                  <div class="u-col" style="gap:4px; margin-top:4px;">
+                    <div class="u-branch-row">
+                      <span class="u-branch-label">≥90 →</span>
+                      <div class="u-node u-green" style="min-width:90px; padding:6px 10px;">
+                        <div class="u-title" style="font-size:11px;">Published ✓</div>
+                      </div>
+                    </div>
+                    <div class="u-branch-row">
+                      <span class="u-branch-label">70–89 →</span>
+                      <div class="u-node u-orange" style="min-width:90px; padding:6px 10px;">
+                        <div class="u-title" style="font-size:11px;">Review Queue</div>
+                      </div>
+                    </div>
+                    <div class="u-branch-row">
+                      <span class="u-branch-label">&lt;70 →</span>
+                      <div class="u-node u-red" style="min-width:90px; padding:6px 10px;">
+                        <div class="u-title" style="font-size:11px;">Rejected ✗</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- ── SWIM LANE 3: Showing You the Results ── -->
+          <div class="swim-lane">
+            <div class="lane-label">
+              <div class="u-col" style="align-items:center;">
+                <div class="lane-label-num" style="background:#E0F2F1; color:#00695C;">3</div>
+                <span class="lane-label-text" style="color:#00695C;">Showing You the Results</span>
+              </div>
+            </div>
+            <div class="lane-content">
+              <div class="u-row" style="align-items:flex-start;">
+                <div class="u-node u-red" style="min-width:160px;">
+                  <div class="u-title">Neon Postgres</div>
+                  <div class="u-desc">Cloud database — listings, queue, alerts</div>
+                </div>
+                <span class="u-arrow" style="margin-top:12px;">→</span>
+                <div class="u-node u-teal" style="min-width:160px;">
+                  <div class="u-title">Express.js :3030</div>
+                  <div class="u-desc">Dashboard server (Node.js)</div>
+                </div>
+                <span class="u-arrow" style="margin-top:12px;">→</span>
+                <div class="u-col" style="gap:6px;">
+                  <div class="u-node u-teal" style="min-width:200px;">
+                    <div class="u-title">Admin Dashboard</div>
+                    <div class="u-desc">Pipeline stats, review queue, bulk re-run AI</div>
+                  </div>
+                  <div class="u-node u-teal" style="min-width:200px;">
+                    <div class="u-title">/home — Browse &amp; Search</div>
+                    <div class="u-desc">Consumer homepage, category browsing</div>
+                  </div>
+                  <div class="u-node u-teal" style="min-width:200px;">
+                    <div class="u-title">/browse — Car Results</div>
+                    <div class="u-desc">CarGurus-style filtered results</div>
+                  </div>
+                  <div class="u-node u-teal" style="min-width:200px;">
+                    <div class="u-title">Email Alerts</div>
+                    <div class="u-desc">Notify when a matching car is found</div>
+                  </div>
+                </div>
+                <span class="u-arrow" style="margin-top:12px;">→</span>
+                <div class="u-node u-green" style="min-width:140px;">
+                  <div class="u-title">Railway Cloud</div>
+                  <div class="u-desc">Deployed live, auto-scaling</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div><!-- unified-canvas -->
+      </div><!-- unified-scroll-wrapper -->
+    </div>
+  </div><!-- section-card -->
+
+
+  <!-- ═══════════════════════════════════════════
+       SECTION A — KIJIJI SCRAPER
+  ════════════════════════════════════════════ -->
+  <div class="section-card">
+    <div class="section-card-header">
+      <span class="section-badge badge-green">Section A</span>
+      <div>
+        <div class="section-title">Kijiji Scraper</div>
+        <div class="section-subtitle">HTTP polling across 6 GTA regions, runs continuously</div>
+      </div>
+    </div>
+    <div class="section-card-body">
+      <div class="plain-english">
+        <div class="pe-label">In plain English</div>
+        <p>Like having 6 people each assigned to a different city, refreshing Kijiji every second and writing down every new car they see. If they've seen a listing before, they skip it. If it's new, they add it to the pile for the AI to review.</p>
+      </div>
+
+      <div class="flow-row" style="flex-wrap:wrap; gap:0; align-items:center;">
+        <div class="flow-node node-green">
+          <div class="node-title">Start: 6 Instances</div>
+          <div class="node-desc">One per GTA region (Toronto, Mississauga, Brampton, Markham, Scarborough, North York)</div>
+        </div>
+        <span class="arrow">→</span>
+        <div class="flow-node node-green">
+          <div class="node-title">Pick Region</div>
+          <div class="node-desc">Rotate through assigned Kijiji search URL</div>
+        </div>
+        <span class="arrow">→</span>
+        <div class="flow-node node-blue">
+          <div class="node-title">Fetch Kijiji Page</div>
+          <div class="node-desc">HTTP GET request, parse HTML</div>
+        </div>
+        <span class="arrow">→</span>
+        <div class="flow-node node-green">
+          <div class="node-title">Parse Listings</div>
+          <div class="node-desc">Extract title, price, URL, listing ID</div>
+        </div>
+        <span class="arrow">→</span>
+        <div class="diamond-wrap">
+          <div class="diamond"><span class="diamond-label">Already Seen?</span></div>
+          <div class="diamond-caption">Check DB by ID</div>
+        </div>
+        <div class="flow-col" style="margin-left:8px; gap:8px;">
+          <div class="flow-row" style="align-items:center; gap:0;">
+            <span style="font-size:11px; color:#6B7280; padding:0 6px; font-weight:600;">Yes →</span>
+            <div class="flow-node node-green" style="min-width:80px; max-width:100px; opacity:0.7;">
+              <div class="node-title">Skip</div>
+              <div class="node-desc">Already in DB</div>
+            </div>
+          </div>
+          <div class="flow-row" style="align-items:center; gap:0;">
+            <span style="font-size:11px; color:#6B7280; padding:0 6px; font-weight:600;">No →</span>
+            <div class="flow-node node-orange">
+              <div class="node-title">Add to Queue</div>
+              <div class="node-desc">Passes to AI workers</div>
+            </div>
+          </div>
+        </div>
+        <span class="arrow">→</span>
+        <div class="flow-node node-green">
+          <div class="node-title">Wait 1.2s</div>
+          <div class="node-desc">Rate limit — polite scraping</div>
+        </div>
+        <span class="arrow">↺</span>
+        <div style="font-size:12px; color:#6B7280; padding: 4px 8px; font-weight:500; font-style:italic;">loop</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════
+       SECTION B — FACEBOOK MARKETPLACE SCRAPER
+  ════════════════════════════════════════════ -->
+  <div class="section-card">
+    <div class="section-card-header">
+      <span class="section-badge badge-green">Section B</span>
+      <div>
+        <div class="section-title">Facebook Marketplace Scraper</div>
+        <div class="section-subtitle">Real browser automation across 40 city/price search combinations</div>
+      </div>
+    </div>
+    <div class="section-card-body">
+      <div class="plain-english">
+        <div class="pe-label">In plain English</div>
+        <p>Opens a real Chrome browser and scrolls Facebook Marketplace like a human, intercepting the data Facebook loads behind the scenes. No login needed — works in incognito mode. Because Facebook loads data via internal API calls, we capture those requests directly instead of scraping HTML.</p>
+      </div>
+
+      <div class="flow-row" style="flex-wrap:wrap; gap:0; align-items:center;">
+        <div class="flow-node node-green">
+          <div class="node-title">Pick Search Combo</div>
+          <div class="node-desc">1 of 40 city + price range combinations</div>
+        </div>
+        <span class="arrow">→</span>
+        <div class="flow-node node-blue">
+          <div class="node-title">Open Chrome (anon)</div>
+          <div class="node-desc">Puppeteer, incognito — no login</div>
+        </div>
+        <span class="arrow">→</span>
+        <div class="flow-node node-green">
+          <div class="node-title">Scroll &amp; Intercept</div>
+          <div class="node-desc">Collect listings as FB's internal API fires</div>
+        </div>
+        <span class="arrow">→</span>
+        <div class="diamond-wrap">
+          <div class="diamond"><span class="diamond-label">Full info?</span></div>
+          <div class="diamond-caption">All fields present?</div>
+        </div>
+        <div class="flow-col" style="margin-left:8px; gap:8px;">
+          <div class="flow-row" style="align-items:center; gap:0;">
+            <span style="font-size:11px; color:#6B7280; padding:0 6px; font-weight:600;">Yes →</span>
+            <div class="flow-node node-teal" style="min-width:100px;">
+              <div class="node-title">Grab Instantly</div>
+              <div class="node-desc">No extra page load</div>
+            </div>
+          </div>
+          <div class="flow-row" style="align-items:center; gap:0;">
+            <span style="font-size:11px; color:#6B7280; padding:0 6px; font-weight:600;">No →</span>
+            <div class="flow-node node-green" style="min-width:100px;">
+              <div class="node-title">Visit Detail Page</div>
+              <div class="node-desc">Load full listing</div>
+            </div>
+          </div>
+        </div>
+        <span class="arrow">→</span>
+        <div class="flow-node node-green">
+          <div class="node-title">3 Pages at Once</div>
+          <div class="node-desc">Parallel browser tabs for speed</div>
+        </div>
+        <span class="arrow">→</span>
+        <div class="flow-node node-orange">
+          <div class="node-title">Add to Queue</div>
+          <div class="node-desc">Into shared listing buffer</div>
+        </div>
+        <span class="arrow">→</span>
+        <div class="flow-node node-green">
+          <div class="node-title">Next Combo</div>
+          <div class="node-desc">Cycle through all 40</div>
+        </div>
+        <span class="arrow">↺</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════
+       SECTION C — AI WORKERS
+  ════════════════════════════════════════════ -->
+  <div class="section-card">
+    <div class="section-card-header">
+      <span class="section-badge badge-orange">Section C</span>
+      <div>
+        <div class="section-title">AI Workers</div>
+        <div class="section-subtitle">Three concurrent workers using different LLM providers to maximize throughput</div>
+      </div>
+    </div>
+    <div class="section-card-body">
+      <div class="plain-english">
+        <div class="pe-label">In plain English</div>
+        <p>Three AI workers chew through the queue simultaneously, each using a different AI provider so they don't compete for the same rate limits. If one provider throttles a worker, it parks the listing back in the queue and waits — the other two keep running.</p>
+      </div>
+
+      <div class="flow-row" style="flex-wrap:wrap; gap:0; align-items:flex-start;">
+        <div class="flow-node node-gray" style="background:#ECEFF1; border:2px solid #455A64;">
+          <div class="node-title" style="color:#455A64;">Queue</div>
+          <div class="node-desc">Pending listings waiting to be processed</div>
+        </div>
+        <span class="arrow" style="margin-top:20px;">→</span>
+        <div class="flow-col" style="gap:8px;">
+          <div class="flow-node node-orange">
+            <div class="node-title">Worker 1 — Cerebras</div>
+            <div class="node-desc">Llama 3.1 70B — ultra-fast inference</div>
+          </div>
+          <div class="flow-node node-orange">
+            <div class="node-title">Worker 2 — Groq</div>
+            <div class="node-desc">Llama 3.1 70B — fast cloud inference</div>
+          </div>
+          <div class="flow-node node-orange">
+            <div class="node-title">Worker 3 — Gemini</div>
+            <div class="node-desc">Flash 2.0 — Google AI platform</div>
+          </div>
+        </div>
+        <span class="arrow" style="margin-top:20px;">→</span>
+        <div class="flow-node node-orange">
+          <div class="node-title">Take Listing</div>
+          <div class="node-desc">Each worker pops one listing at a time</div>
+        </div>
+        <span class="arrow" style="margin-top:20px;">→</span>
+        <div class="flow-node node-purple">
+          <div class="node-title">Run M2 Pipeline</div>
+          <div class="node-desc">7-step processing assembly line</div>
+        </div>
+        <span class="arrow" style="margin-top:20px;">→</span>
+        <div class="diamond-wrap">
+          <div class="diamond"><span class="diamond-label">Rate Limited?</span></div>
+          <div class="diamond-caption">Provider throttled?</div>
+        </div>
+        <div class="flow-col" style="margin-left:8px; gap:8px;">
+          <div class="flow-row" style="align-items:center; gap:0;">
+            <span style="font-size:11px; color:#6B7280; padding:0 6px; font-weight:600;">No →</span>
+            <div class="flow-node node-teal" style="min-width:80px;">
+              <div class="node-title">Done ✓</div>
+              <div class="node-desc">Saved to DB</div>
+            </div>
+          </div>
+          <div class="flow-row" style="align-items:center; gap:0;">
+            <span style="font-size:11px; color:#6B7280; padding:0 6px; font-weight:600;">Yes →</span>
+            <div class="flow-node node-orange" style="min-width:100px;">
+              <div class="node-title">Put Back + Wait</div>
+              <div class="node-desc">Re-queued, retry later</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════
+       SECTION D — M2 PIPELINE
+  ════════════════════════════════════════════ -->
+  <div class="section-card">
+    <div class="section-card-header">
+      <span class="section-badge badge-purple">Section D</span>
+      <div>
+        <div class="section-title">M2 Pipeline — The Assembly Line</div>
+        <div class="section-subtitle">Every listing passes through 7 sequential processing steps</div>
+      </div>
+    </div>
+    <div class="section-card-body">
+      <div class="plain-english">
+        <div class="pe-label">In plain English</div>
+        <p>Every listing goes through a 7-step assembly line. By the end, we know the full story of the car and how trustworthy the listing is. A perfect listing scores 100. Every missing field costs 8 points. Listings below 70 are rejected automatically; 70–89 go to a human review queue.</p>
+      </div>
+
+      <!-- Conveyor Belt -->
+      <div style="overflow-x:auto; margin-bottom:28px;">
+        <div class="conveyor" style="min-width:900px;">
+          <div class="conveyor-step step-orange">
+            <div class="conveyor-step-num">STEP 1</div>
+            <div class="conveyor-step-title">Extract</div>
+            <div class="conveyor-step-desc">Read the listing. Pull out make, model, year, price, mileage, transmission, fuel type. Kijiji: instant structured data. Facebook: AI reads the free-text description.</div>
+          </div>
+          <div class="conveyor-step step-purple">
+            <div class="conveyor-step-num">STEP 2</div>
+            <div class="conveyor-step-title">Validate</div>
+            <div class="conveyor-step-desc">Fix naming inconsistencies. "VW" → "Volkswagen". "2-door" → standardized body type. Verify the year is realistic (2000–2026).</div>
+          </div>
+          <div class="conveyor-step step-purple">
+            <div class="conveyor-step-num">STEP 3</div>
+            <div class="conveyor-step-title">Vision</div>
+            <div class="conveyor-step-desc">Photo analysis via AI vision model. Guess the exterior colour from the listing's main photo. Fills a field sellers often forget.</div>
+          </div>
+          <div class="conveyor-step step-purple">
+            <div class="conveyor-step-num">STEP 4</div>
+            <div class="conveyor-step-title">CARFAX</div>
+            <div class="conveyor-step-desc">Look up VIN in CARFAX database. Returns accident history, number of previous owners, open liens, and service records if available.</div>
+          </div>
+          <div class="conveyor-step step-orange">
+            <div class="conveyor-step-num">STEP 5</div>
+            <div class="conveyor-step-title">Redact PII</div>
+            <div class="conveyor-step-desc">Strip seller's phone number and email address from the description text. Keeps our platform clean and protects users.</div>
+          </div>
+          <div class="conveyor-step step-orange">
+            <div class="conveyor-step-num">STEP 6</div>
+            <div class="conveyor-step-title">Score</div>
+            <div class="conveyor-step-desc">Rate listing quality 0–100. Full marks for complete, clean data. Deduct 8 points per missing required field. Flag anomalies.</div>
+          </div>
+          <div class="conveyor-step step-teal">
+            <div class="conveyor-step-num">STEP 7</div>
+            <div class="conveyor-step-title">Save</div>
+            <div class="conveyor-step-desc">Write the enriched listing to Neon Postgres. Trigger email alerts for any matching saved searches. Route to Published, Review, or Rejected.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Score Routing -->
+      <div style="margin-top:8px;">
+        <div style="font-size:13px; font-weight:700; color:#374151; margin-bottom:12px;">After scoring — where does the listing go?</div>
+        <div class="score-routing">
+          <div class="diamond-wrap">
+            <div class="diamond" style="width:72px; height:72px;"><span class="diamond-label" style="font-size:11px;">Quality Score</span></div>
+            <div class="diamond-caption">0–100</div>
+          </div>
+          <span class="arrow">→</span>
+          <div class="flow-col" style="gap:10px;">
+            <div class="flow-row" style="align-items:center; gap:0;">
+              <span style="font-size:12px; font-weight:600; color:#2E7D32; padding:0 10px; min-width:70px;">≥ 90</span>
+              <div class="score-outcome outcome-published">
+                <div class="out-title">Published ✓</div>
+                <div class="out-range">Shown to users immediately</div>
+              </div>
+            </div>
+            <div class="flow-row" style="align-items:center; gap:0;">
+              <span style="font-size:12px; font-weight:600; color:#E65100; padding:0 10px; min-width:70px;">70 – 89</span>
+              <div class="score-outcome outcome-review">
+                <div class="out-title">Review Queue</div>
+                <div class="out-range">Human checks before publish</div>
+              </div>
+            </div>
+            <div class="flow-row" style="align-items:center; gap:0;">
+              <span style="font-size:12px; font-weight:600; color:#C62828; padding:0 10px; min-width:70px;">&lt; 70</span>
+              <div class="score-outcome outcome-rejected">
+                <div class="out-title">Rejected ✗</div>
+                <div class="out-range">Too incomplete or suspicious</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════
+       SECTION E — DATABASE
+  ════════════════════════════════════════════ -->
+  <div class="section-card">
+    <div class="section-card-header">
+      <span class="section-badge badge-red">Section E</span>
+      <div>
+        <div class="section-title">Database</div>
+        <div class="section-subtitle">Neon Postgres — serverless cloud database, 3 tables</div>
+      </div>
+    </div>
+    <div class="section-card-body">
+      <div class="plain-english">
+        <div class="pe-label">In plain English</div>
+        <p>All data lives in a Postgres database in the cloud (Neon). Three tables: the cars themselves, the flagged listings that need a human to look at, and the alert subscriptions for users who want an email when a matching car shows up.</p>
+      </div>
+
+      <div class="db-grid">
+        <div class="db-card">
+          <div class="db-table-name">listings</div>
+          <div class="db-count">3,800+ rows</div>
+          <div class="db-desc">Every processed car ad — from Kijiji and Facebook. Enriched with AI-extracted fields, score, colour, CARFAX data.</div>
+          <div class="db-field">id, source, title, price, year</div>
+          <div class="db-field">make, model, mileage, colour</div>
+          <div class="db-field">score, status, carfax_data</div>
+          <div class="db-field">description, image_url, url</div>
+          <div class="db-field">created_at, updated_at</div>
+        </div>
+        <div class="db-card">
+          <div class="db-table-name">review_queue</div>
+          <div class="db-count">Listings scoring 70–89</div>
+          <div class="db-desc">Listings that scored below the auto-publish threshold but above the reject threshold. A human checks these before they go live.</div>
+          <div class="db-field">id, listing_id (FK)</div>
+          <div class="db-field">score, flagged_fields</div>
+          <div class="db-field">reviewer_notes</div>
+          <div class="db-field">reviewed_at, decision</div>
+        </div>
+        <div class="db-card">
+          <div class="db-table-name">saved_searches</div>
+          <div class="db-count">Email alert subscriptions</div>
+          <div class="db-desc">Users subscribe with search criteria (make, model, max price, year range). When a matching new listing is published, they get an email.</div>
+          <div class="db-field">id, email</div>
+          <div class="db-field">make, model, max_price</div>
+          <div class="db-field">year_min, year_max</div>
+          <div class="db-field">created_at, last_notified</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════
+       SECTION F — DASHBOARD & ROUTES
+  ════════════════════════════════════════════ -->
+  <div class="section-card">
+    <div class="section-card-header">
+      <span class="section-badge badge-teal">Section F</span>
+      <div>
+        <div class="section-title">Dashboard &amp; Routes</div>
+        <div class="section-subtitle">Express.js server on port 3030 — deployed live on Railway</div>
+      </div>
+    </div>
+    <div class="section-card-body">
+      <div class="plain-english">
+        <div class="pe-label">In plain English</div>
+        <p>One Express.js server serves two audiences: the team's operations dashboard (pipeline stats, reviewing flagged listings, triggering re-runs) and the public-facing car search website. It's deployed live on Railway so it's always accessible.</p>
+      </div>
+
+      <div class="routes-grid">
+        <!-- Admin panel -->
+        <div class="routes-panel admin">
+          <div class="routes-panel-title">⚙ Admin — Operations Dashboard</div>
+          <div class="route-item">
+            <span class="route-path">GET /</span>
+            <div class="route-desc">Pipeline overview — scraper status, queue depth, listings ingested today, error counts</div>
+          </div>
+          <div class="route-item">
+            <span class="route-path">GET /review</span>
+            <div class="route-desc">Review queue — browse listings scoring 70–89, approve or reject them manually</div>
+          </div>
+          <div class="route-item">
+            <span class="route-path">POST /approve/:id</span>
+            <div class="route-desc">Approve a flagged listing — moves it to published state</div>
+          </div>
+          <div class="route-item">
+            <span class="route-path">POST /reject/:id</span>
+            <div class="route-desc">Reject a flagged listing — removes from public view</div>
+          </div>
+          <div class="route-item">
+            <span class="route-path">POST /rerun-ai</span>
+            <div class="route-desc">Bulk re-process listings through M2 Pipeline — useful after model upgrades</div>
+          </div>
+          <div class="route-item">
+            <span class="route-path">GET /stats</span>
+            <div class="route-desc">JSON endpoint — pipeline metrics, score distributions, source breakdown</div>
+          </div>
+        </div>
+
+        <!-- Consumer panel -->
+        <div class="routes-panel consumer">
+          <div class="routes-panel-title">Car Buyers — Public Website</div>
+          <div class="route-item">
+            <span class="route-path">GET /home</span>
+            <div class="route-desc">Homepage — hero search bar, browse by make/body type, featured listings</div>
+          </div>
+          <div class="route-item">
+            <span class="route-path">GET /browse</span>
+            <div class="route-desc">CarGurus-style results — filter by make, model, year, price, mileage, colour, source</div>
+          </div>
+          <div class="route-item">
+            <span class="route-path">GET /listing/:id</span>
+            <div class="route-desc">Full listing detail — all enriched fields, CARFAX report, photos, original source link</div>
+          </div>
+          <div class="route-item">
+            <span class="route-path">POST /alerts</span>
+            <div class="route-desc">Subscribe to email alerts — enter email + search criteria, get notified on match</div>
+          </div>
+          <div class="route-item">
+            <span class="route-path">GET /api/listings</span>
+            <div class="route-desc">JSON API — returns paginated, filtered listings for frontend rendering</div>
+          </div>
+          <div style="margin-top:16px; padding:10px 12px; background:#B2DFDB; border-radius:8px;">
+            <div style="font-size:12px; font-weight:700; color:#00695C; margin-bottom:4px;">Live deployment</div>
+            <div style="font-size:12px; color:#374151;">Hosted on Railway — automatic deploys from GitHub main branch. Always-on, no cold starts.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════
+       SECTION G — TECH STACK
+  ════════════════════════════════════════════ -->
+  <div class="section-card">
+    <div class="section-card-header">
+      <span class="section-badge badge-gray">Tech Stack</span>
+      <div>
+        <div class="section-title">Technologies Used</div>
+        <div class="section-subtitle">Every tool in the platform</div>
+      </div>
+    </div>
+    <div class="section-card-body">
+      <div class="tech-grid">
+        <div class="tech-card">
+          <div class="tech-category">Scraping</div>
+          <div class="tech-name">Puppeteer</div>
+          <div class="tech-desc">Headless Chrome automation for Facebook Marketplace</div>
+        </div>
+        <div class="tech-card">
+          <div class="tech-category">Scraping</div>
+          <div class="tech-name">Axios + Cheerio</div>
+          <div class="tech-desc">HTTP requests + HTML parsing for Kijiji</div>
+        </div>
+        <div class="tech-card">
+          <div class="tech-category">AI — LLM</div>
+          <div class="tech-name">Cerebras API</div>
+          <div class="tech-desc">Llama 3.1 70B — ultra-fast inference, Worker 1</div>
+        </div>
+        <div class="tech-card">
+          <div class="tech-category">AI — LLM</div>
+          <div class="tech-name">Groq API</div>
+          <div class="tech-desc">Llama 3.1 70B — fast cloud inference, Worker 2</div>
+        </div>
+        <div class="tech-card">
+          <div class="tech-category">AI — LLM</div>
+          <div class="tech-name">Gemini Flash 2.0</div>
+          <div class="tech-desc">Google AI — vision + text extraction, Worker 3</div>
+        </div>
+        <div class="tech-card">
+          <div class="tech-category">Backend</div>
+          <div class="tech-name">Express.js</div>
+          <div class="tech-desc">Node.js web server, port 3030, REST + server-side rendering</div>
+        </div>
+        <div class="tech-card">
+          <div class="tech-category">Database</div>
+          <div class="tech-name">Neon Postgres</div>
+          <div class="tech-desc">Serverless Postgres — 3 tables, cloud-hosted, auto-scaling</div>
+        </div>
+        <div class="tech-card">
+          <div class="tech-category">ORM</div>
+          <div class="tech-name">node-postgres (pg)</div>
+          <div class="tech-desc">Direct SQL queries — no ORM overhead, full control</div>
+        </div>
+        <div class="tech-card">
+          <div class="tech-category">Deployment</div>
+          <div class="tech-name">Railway</div>
+          <div class="tech-desc">Cloud platform — automatic GitHub deploys, always-on</div>
+        </div>
+        <div class="tech-card">
+          <div class="tech-category">Data</div>
+          <div class="tech-name">CARFAX API</div>
+          <div class="tech-desc">Vehicle history lookup by VIN — accidents, owners, liens</div>
+        </div>
+        <div class="tech-card">
+          <div class="tech-category">Email</div>
+          <div class="tech-name">Nodemailer</div>
+          <div class="tech-desc">Sends alert emails when a matching car listing appears</div>
+        </div>
+        <div class="tech-card">
+          <div class="tech-category">Language</div>
+          <div class="tech-name">TypeScript / Node.js</div>
+          <div class="tech-desc">Entire backend — monorepo with shared packages</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- page-body -->
+
+</body>
+</html>

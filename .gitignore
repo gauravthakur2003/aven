@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+.npm/
+
+# Build output
+dist/
+
+# Environment variables — NEVER commit
+.env
+.env.local
+.env.*.local
+
+# Sensitive / session files
+packages/normaliser/fb-session.json
+packages/normaliser/fb-auth-setup.ts
+
+# Logs
+*.log
+/tmp/
+
+# macOS
+.DS_Store
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Railway / editor
+.railway/
+.vscode/

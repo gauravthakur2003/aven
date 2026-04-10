@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aven — Command Center</title>
+</head>
+<body style="font-family: 'Georgia', serif; background: #0d0d0d; min-height: 100vh; padding: 0; color: #e8e0d0; margin:0;">
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Libre+Baskerville:wght@400;700&display=swap');
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  .dash { font-family: 'DM Mono', monospace; background: #0d0d0d; padding: 24px; color: #e8e0d0; }
+
+  .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 28px; border-bottom: 1px solid #2a1a1a; padding-bottom: 16px; }
+  .logo { font-family: 'Libre Baskerville', serif; font-size: 22px; color: #c0392b; letter-spacing: 2px; }
+  .logo span { color: #e8e0d0; font-size: 11px; font-family: 'DM Mono', monospace; display: block; letter-spacing: 3px; margin-top: 2px; }
+  .live-pill { background: #1a0a0a; border: 1px solid #c0392b; border-radius: 2px; padding: 4px 12px; font-size: 11px; color: #e74c3c; letter-spacing: 2px; display: flex; align-items: center; gap: 6px; }
+  .live-dot { width: 6px; height: 6px; border-radius: 50%; background: #e74c3c; animation: blink 1.4s infinite; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:.2} }
+
+  .grid4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+
+  .card { background: #141414; border: 1px solid #2a1a1a; border-radius: 4px; padding: 18px; position: relative; overflow: hidden; }
+  .card::before { content:''; position:absolute; top:0; left:0; width:3px; height:100%; background: #c0392b; }
+  .card.blue::before { background: #2980b9; }
+  .card.green::before { background: #27ae60; }
+  .card.amber::before { background: #e67e22; }
+  .card.purple::before { background: #8e44ad; }
+  .card.gray::before { background: #555; }
+
+  .card-label { font-size: 10px; letter-spacing: 2px; color: #888; text-transform: uppercase; margin-bottom: 8px; }
+  .card-value { font-size: 28px; font-weight: 500; color: #e8e0d0; line-height: 1; margin-bottom: 4px; }
+  .card-sub { font-size: 11px; color: #666; margin-top: 4px; }
+  .card-delta { font-size: 11px; margin-top: 6px; }
+  .up { color: #27ae60; }
+  .down { color: #e74c3c; }
+  .neutral { color: #888; }
+
+  .section-title { font-size: 10px; letter-spacing: 3px; color: #c0392b; text-transform: uppercase; margin-bottom: 14px; }
+
+  .source-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .source-table th { text-align: left; color: #666; font-size: 10px; letter-spacing: 2px; text-transform: uppercase; padding: 0 0 10px; font-weight: 400; border-bottom: 1px solid #1f1f1f; }
+  .source-table td { padding: 10px 0; border-bottom: 1px solid #1a1a1a; color: #c0b8a8; vertical-align: middle; }
+  .source-table td:last-child { text-align: right; }
+  .source-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
+  .bar-wrap { background: #1a1a1a; border-radius: 2px; height: 4px; width: 100%; margin-top: 4px; }
+  .bar-fill { height: 4px; border-radius: 2px; }
+
+  .pipeline { display: flex; align-items: center; gap: 0; }
+  .pipe-stage { flex: 1; text-align: center; }
+  .pipe-box { background: #1a1a1a; border: 1px solid #2a1a1a; border-radius: 3px; padding: 12px 8px; }
+  .pipe-arrow { color: #c0392b; font-size: 16px; flex-shrink: 0; padding: 0 4px; }
+  .pipe-num { font-size: 18px; font-weight: 500; color: #e8e0d0; }
+  .pipe-label { font-size: 10px; color: #666; margin-top: 4px; letter-spacing: 1px; }
+
+  .dedup-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #1a1a1a; font-size: 12px; }
+  .dedup-row:last-child { border-bottom: none; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 2px; font-size: 10px; letter-spacing: 1px; }
+  .tag-green { background: #0d2b18; color: #27ae60; border: 1px solid #1a4a2a; }
+  .tag-red { background: #2b0d0d; color: #e74c3c; border: 1px solid #4a1a1a; }
+  .tag-amber { background: #2b1f0d; color: #e67e22; border: 1px solid #4a3a1a; }
+  .tag-blue { background: #0d1f2b; color: #2980b9; border: 1px solid #1a3a4a; }
+
+  .rev-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #1a1a1a; font-size: 12px; color: #c0b8a8; }
+  .rev-row:last-child { border-bottom: none; }
+
+  .ad-slot { background: #1a1a1a; border: 1px solid #2a2a1a; border-radius: 3px; padding: 12px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+  .ad-slot-name { color: #c0b8a8; }
+  .ad-slot-info { display: flex; gap: 16px; align-items: center; }
+  .ad-badge { background: #2b1a0d; border: 1px solid #c0392b; color: #e74c3c; padding: 2px 8px; border-radius: 2px; font-size: 10px; letter-spacing: 1px; }
+  .ad-badge.promoted { background: #1a2b0d; border-color: #27ae60; color: #27ae60; }
+
+  .mini-chart { display: flex; align-items: flex-end; gap: 3px; height: 40px; margin-top: 12px; }
+  .bar { background: #c0392b; border-radius: 1px 1px 0 0; flex: 1; opacity: 0.7; transition: opacity 0.2s; }
+  .bar:hover { opacity: 1; }
+
+  .unsure-alert { background: #1a1200; border: 1px solid #c0392b; border-radius: 3px; padding: 14px; display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+  .alert-text { font-size: 12px; color: #e8d0a0; }
+  .alert-badge { background: #c0392b; color: #fff; padding: 4px 14px; border-radius: 2px; font-size: 11px; cursor: pointer; letter-spacing: 1px; }
+
+  .footer-bar { border-top: 1px solid #2a1a1a; padding-top: 14px; display: flex; justify-content: space-between; font-size: 10px; color: #444; letter-spacing: 1px; }
+
+  /* ── Live feed ── */
+  #feed-list { max-height: 340px; overflow-y: auto; font-size: 12px; }
+  #feed-list::-webkit-scrollbar { width: 4px; }
+  #feed-list::-webkit-scrollbar-track { background: #1a1a1a; }
+  #feed-list::-webkit-scrollbar-thumb { background: #3a1a1a; border-radius: 2px; }
+  .feed-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid #1a1a1a; animation: fadeIn 0.3s ease; }
+  .feed-row:first-child { border-top: none; }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+  .feed-n    { color: #3a3a3a; font-size: 10px; min-width: 30px; text-align: right; flex-shrink: 0; }
+  .feed-ts   { color: #555; font-size: 10px; min-width: 64px; flex-shrink: 0; }
+  .feed-title { flex: 1; color: #c0b8a8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .feed-price { color: #c0392b; min-width: 72px; text-align: right; flex-shrink: 0; }
+  .feed-km   { color: #555; font-size: 10px; min-width: 76px; text-align: right; flex-shrink: 0; }
+  .feed-seller { font-size: 10px; min-width: 48px; text-align: right; flex-shrink: 0; }
+  .feed-empty { color: #333; text-align: center; padding: 28px; font-size: 11px; letter-spacing: 2px; }
+</style>
+
+<div class="dash">
+
+  <!-- Header -->
+  <div class="topbar">
+    <div class="logo">AVEN <span>COMMAND CENTER  ·  v0.1</span></div>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <div class="live-pill"><div class="live-dot"></div> LIVE</div>
+      <div id="last-sync" style="font-size:11px;color:#555;">Last sync: —</div>
+    </div>
+  </div>
+
+  <!-- Alert: unsure bucket -->
+  <div class="unsure-alert">
+    <div class="alert-text">⚠ <strong style="color:#e8d0a0;">47 listings</strong> in the <strong style="color:#e8d0a0;">UNSURE bucket</strong> — require manual review for deduplication. These have overlapping VIN, photo similarity &gt;80%, but different prices.</div>
+    <div class="alert-badge">REVIEW NOW</div>
+  </div>
+
+  <!-- Live scrape feed -->
+  <div class="card gray" style="margin-bottom:20px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
+      <div class="section-title" style="margin-bottom:0;">Live scrape feed · Kijiji GTA</div>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <span id="feed-status" style="font-size:11px;color:#555;letter-spacing:1px;">NOT CONNECTED</span>
+        <span style="font-size:18px;font-weight:500;color:#c0392b;" id="feed-count">0</span>
+        <span style="font-size:10px;color:#555;letter-spacing:1px;">SCRAPED</span>
+      </div>
+    </div>
+    <!-- Column headers -->
+    <div style="display:flex;gap:10px;padding:0 0 6px;border-bottom:1px solid #222;font-size:10px;color:#444;letter-spacing:1px;text-transform:uppercase;">
+      <span style="min-width:30px;text-align:right;">#</span>
+      <span style="min-width:64px;">Time</span>
+      <span style="flex:1;">Title</span>
+      <span style="min-width:72px;text-align:right;">Price</span>
+      <span style="min-width:76px;text-align:right;">Mileage</span>
+      <span style="min-width:48px;text-align:right;">Seller</span>
+    </div>
+    <div id="feed-list">
+      <div class="feed-empty">RUN  npx ts-node server.ts  THEN OPEN  http://localhost:3000</div>
+    </div>
+  </div>
+
+  <!-- KPI Row -->
+  <div class="section-title">Overview</div>
+  <div class="grid4">
+    <div class="card">
+      <div class="card-label">Total Listings</div>
+      <div class="card-value">187,432</div>
+      <div class="card-delta up">↑ 4,210 today</div>
+      <div class="mini-chart">
+        <div class="bar" style="height:20px"></div><div class="bar" style="height:28px"></div><div class="bar" style="height:22px"></div><div class="bar" style="height:32px"></div><div class="bar" style="height:26px"></div><div class="bar" style="height:35px"></div><div class="bar" style="height:40px"></div>
+      </div>
+    </div>
+    <div class="card green">
+      <div class="card-label">Unique (deduped)</div>
+      <div class="card-value">142,017</div>
+      <div class="card-delta neutral">24% dupes removed</div>
+    </div>
+    <div class="card amber">
+      <div class="card-label">Unsure Bucket</div>
+      <div class="card-value" style="color:#e67e22">47</div>
+      <div class="card-delta down">↑ 12 since yesterday</div>
+    </div>
+    <div class="card blue">
+      <div class="card-label">Pipeline Health</div>
+      <div class="card-value" style="color:#2980b9">98.2%</div>
+      <div class="card-delta up">All scrapers running</div>
+    </div>
+  </div>
+
+  <!-- Source breakdown + Pipeline -->
+  <div class="grid2">
+
+    <div class="card gray" style="padding: 18px;">
+      <div class="section-title">Listings per source</div>
+      <table class="source-table">
+        <thead><tr>
+          <th>Platform</th><th>Listings</th><th style="text-align:right">Share</th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <td><span class="source-dot" style="background:#c0392b"></span>AutoTrader.ca</td>
+            <td><div>92,000</div><div class="bar-wrap"><div class="bar-fill" style="width:49%;background:#c0392b"></div></div></td>
+            <td>49%</td>
+          </tr>
+          <tr>
+            <td><span class="source-dot" style="background:#2980b9"></span>Kijiji Autos</td>
+            <td><div>52,000</div><div class="bar-wrap"><div class="bar-fill" style="width:28%;background:#2980b9"></div></div></td>
+            <td>28%</td>
+          </tr>
+          <tr>
+            <td><span class="source-dot" style="background:#27ae60"></span>Facebook MP</td>
+            <td><div>28,000</div><div class="bar-wrap"><div class="bar-fill" style="width:15%;background:#27ae60"></div></div></td>
+            <td>15%</td>
+          </tr>
+          <tr>
+            <td><span class="source-dot" style="background:#e67e22"></span>CarGurus.ca</td>
+            <td><div>9,800</div><div class="bar-wrap"><div class="bar-fill" style="width:5%;background:#e67e22"></div></div></td>
+            <td>5%</td>
+          </tr>
+          <tr>
+            <td><span class="source-dot" style="background:#8e44ad"></span>Dealer sites</td>
+            <td><div>3,200</div><div class="bar-wrap"><div class="bar-fill" style="width:2%;background:#8e44ad"></div></div></td>
+            <td>2%</td>
+          </tr>
+          <tr>
+            <td><span class="source-dot" style="background:#888"></span>Repos / Rentals</td>
+            <td><div>2,432</div><div class="bar-wrap"><div class="bar-fill" style="width:1%;background:#888"></div></div></td>
+            <td>1%</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card purple" style="padding: 18px;">
+      <div class="section-title">Deduplication breakdown</div>
+      <div class="dedup-row">
+        <span style="color:#888;font-size:11px;">Method</span>
+        <span style="color:#888;font-size:11px;">Caught</span>
+      </div>
+      <div class="dedup-row"><span>VIN exact match</span><span><span class="tag tag-green">28,410</span></span></div>
+      <div class="dedup-row"><span>Photo hash similarity ≥95%</span><span><span class="tag tag-green">8,220</span></span></div>
+      <div class="dedup-row"><span>Feature overlap ≥90%</span><span><span class="tag tag-green">5,640</span></span></div>
+      <div class="dedup-row"><span>Combined score 70–89%</span><span><span class="tag tag-amber">47</span> <span style="color:#666;font-size:10px;margin-left:4px;">→ UNSURE</span></span></div>
+      <div class="dedup-row"><span>Confirmed unique</span><span><span class="tag tag-blue">142,017</span></span></div>
+      <div style="margin-top:16px;padding-top:12px;border-top:1px solid #1f1f1f;">
+        <div class="card-label">Dedup accuracy rate</div>
+        <div style="font-size:22px;font-weight:500;color:#8e44ad">99.97%</div>
+        <div class="card-sub">VIN alone resolves ~63% of all duplicates</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pipeline flow -->
+  <div class="card gray" style="margin-bottom:20px;">
+    <div class="section-title">Today's ingestion pipeline</div>
+    <div class="pipeline">
+      <div class="pipe-stage"><div class="pipe-box"><div class="pipe-num">52,401</div><div class="pipe-label">SCRAPED</div></div></div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-stage"><div class="pipe-box"><div class="pipe-num">52,388</div><div class="pipe-label">PARSED</div></div></div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-stage"><div class="pipe-box"><div class="pipe-num">48,110</div><div class="pipe-label">NORMALIZED</div></div></div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-stage"><div class="pipe-box"><div class="pipe-num" style="color:#e74c3c">4,210</div><div class="pipe-label">DUPES REMOVED</div></div></div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-stage"><div class="pipe-box"><div class="pipe-num" style="color:#e67e22">47</div><div class="pipe-label">UNSURE</div></div></div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-stage"><div class="pipe-box"><div class="pipe-num" style="color:#27ae60">4,163</div><div class="pipe-label">NEW LIVE</div></div></div>
+    </div>
+  </div>
+
+  <!-- Revenue + Ads -->
+  <div class="grid3">
+
+    <div class="card amber">
+      <div class="section-title">Revenue (this month)</div>
+      <div class="dedup-row"><span>Listing view charges</span><span style="color:#e8e0d0">$3,240</span></div>
+      <div class="dedup-row"><span>Promoted listings</span><span style="color:#e8e0d0">$1,820</span></div>
+      <div class="dedup-row"><span>Top-of-results ads</span><span style="color:#e8e0d0">$940</span></div>
+      <div class="dedup-row"><span>Affiliate (insurance)</span><span style="color:#e8e0d0">$280</span></div>
+      <div class="dedup-row" style="border-top:1px solid #3a2a0a;margin-top:4px;padding-top:8px">
+        <span style="color:#e67e22;font-weight:500">Total</span>
+        <span style="color:#e67e22;font-weight:500;font-size:16px">$6,280</span>
+      </div>
+    </div>
+
+    <div class="card" style="border-left-color:#e67e22">
+      <div class="section-title" style="color:#e67e22">Sponsored / Promoted Listings</div>
+      <div class="ad-slot">
+        <div>
+          <div class="ad-slot-name">Automax Mississauga</div>
+          <div style="font-size:10px;color:#666;margin-top:2px">Top slot · 12 listings</div>
+        </div>
+        <div class="ad-slot-info">
+          <span style="font-size:11px;color:#888">$0.45/click</span>
+          <span class="ad-badge">TOP SLOT</span>
+        </div>
+      </div>
+      <div class="ad-slot">
+        <div>
+          <div class="ad-slot-name">Drive Nation Toronto</div>
+          <div style="font-size:10px;color:#666;margin-top:2px">Promoted · 8 listings</div>
+        </div>
+        <div class="ad-slot-info">
+          <span style="font-size:11px;color:#888">$0.30/click</span>
+          <span class="ad-badge promoted">PROMOTED</span>
+        </div>
+      </div>
+      <div class="ad-slot">
+        <div>
+          <div class="ad-slot-name">Honda Village</div>
+          <div style="font-size:10px;color:#666;margin-top:2px">Promoted · 5 listings</div>
+        </div>
+        <div class="ad-slot-info">
+          <span style="font-size:11px;color:#888">$0.25/click</span>
+          <span class="ad-badge promoted">PROMOTED</span>
+        </div>
+      </div>
+      <div style="font-size:10px;color:#555;margin-top:10px;letter-spacing:1px;">3 ACTIVE CAMPAIGNS  ·  $2,760 BID BUDGET</div>
+    </div>
+
+    <div class="card blue">
+      <div class="section-title">Top search requests today</div>
+      <div class="dedup-row"><span>Used SUV under $25k · Toronto</span><span style="color:#2980b9">1,240</span></div>
+      <div class="dedup-row"><span>Toyota Corolla · Ontario</span><span style="color:#2980b9">840</span></div>
+      <div class="dedup-row"><span>Budget car under $10k</span><span style="color:#2980b9">710</span></div>
+      <div class="dedup-row"><span>Honda Civic · under 80k km</span><span style="color:#2980b9">620</span></div>
+      <div class="dedup-row"><span>Family SUV safetied</span><span style="color:#2980b9">490</span></div>
+      <div style="margin-top:14px;padding-top:12px;border-top:1px solid #1a2b3a;">
+        <div class="card-label">Persona intake completions</div>
+        <div style="font-size:22px;font-weight:500;color:#2980b9">312 <span style="font-size:14px;color:#555">today</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer-bar">
+    <span>AVEN  ·  INTERNAL DASHBOARD</span>
+    <span>SCRAPERS: 6/6 ACTIVE</span>
+    <span id="footer-refresh">NEXT REFRESH: —</span>
+    <span>BUILD v0.1.4</span>
+  </div>
+
+</div>
+
+<script>
+  const feedList   = document.getElementById('feed-list');
+  const feedCount  = document.getElementById('feed-count');
+  const feedStatus = document.getElementById('feed-status');
+  const lastSync   = document.getElementById('last-sync');
+
+  let listings = [];
+
+  function renderFeed() {
+    if (listings.length === 0) return;
+    feedList.innerHTML = listings.slice(0, 25).map(d => `
+      <div class="feed-row">
+        <span class="feed-n">${d.n}</span>
+        <span class="feed-ts">${d.ts}</span>
+        <span class="feed-title">${d.title}</span>
+        <span class="feed-price">${d.price}${d.priceRating ? `<span style="font-size:9px;color:#555;margin-left:3px">[${d.priceRating}]</span>` : ''}</span>
+        <span class="feed-km">${d.mileage || '—'}</span>
+        <span class="feed-seller" style="color:${d.seller === 'Dealer' ? '#2980b9' : d.seller === 'Private' ? '#27ae60' : '#444'}">${d.seller || '—'}</span>
+      </div>
+    `).join('');
+  }
+
+  function setStatus(text, color) {
+    feedStatus.textContent = text;
+    feedStatus.style.color = color;
+  }
+
+  function connect() {
+    const sse = new EventSource('http://localhost:3000/events');
+
+    sse.addEventListener('state', e => {
+      const s = JSON.parse(e.data);
+      listings = s.recentListings;
+      feedCount.textContent = s.scraped;
+      if (listings.length > 0) renderFeed();
+      setStatus('LIVE', '#27ae60');
+    });
+
+    sse.addEventListener('status', e => {
+      const d = JSON.parse(e.data);
+      setStatus(d.message.toUpperCase(), '#27ae60');
+    });
+
+    sse.addEventListener('listing', e => {
+      const d = JSON.parse(e.data);
+      feedCount.textContent = d.n;
+      listings.unshift(d);
+      if (listings.length > 100) listings.pop();
+      renderFeed();
+
+      // Update header sync time
+      const now = new Date().toLocaleTimeString('en-CA', { hour: '2-digit', minute: '2-digit' });
+      lastSync.textContent = 'Last sync: ' + now;
+      setStatus('LIVE', '#27ae60');
+    });
+
+    sse.addEventListener('done', e => {
+      const d = JSON.parse(e.data);
+      setStatus('DONE  ·  ' + d.total + ' TOTAL', '#e67e22');
+    });
+
+    sse.onerror = () => {
+      setStatus('NOT CONNECTED', '#e74c3c');
+      sse.close();
+      // Retry connection every 5 seconds
+      setTimeout(connect, 5000);
+    };
+  }
+
+  connect();
+</script>
+
+</body>
+</html>
