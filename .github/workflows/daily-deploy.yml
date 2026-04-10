@@ -158,11 +158,19 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Deploy to Railway
+      - name: Deploy dashboard to Railway
         working-directory: packages/dashboard
         run: railway up --detach
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
+      - name: Deploy pipeline worker to Railway
+        working-directory: packages/normaliser
+        run: railway up --detach --service pipeline
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
       - name: Confirm deployment
-        run: echo "✅ Deployed to https://aven-dashboard-production.up.railway.app"
+        run: |
+          echo "✅ Dashboard → https://aven-dashboard-production.up.railway.app"
+          echo "✅ Pipeline worker → Railway (pipeline service)"
