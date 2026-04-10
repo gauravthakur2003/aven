@@ -562,14 +562,18 @@ async function main(): Promise<void> {
     normaliserWorker(i, getPool(), provider),
   );
 
-  const hasFbSession = require('fs').existsSync(require('path').join(__dirname, 'fb-session.json'))
-    || !!process.env.FB_STORAGE_STATE;
+  // FB_ENABLED=true must be explicitly set to turn on Facebook scraping.
+  // Disabled by default — set FB_ENABLED=true in .env to re-enable.
+  const fbEnabled = process.env.FB_ENABLED === 'true';
+  const hasFbSession = fbEnabled && (
+    require('fs').existsSync(require('path').join(__dirname, 'fb-session.json'))
+    || !!process.env.FB_STORAGE_STATE
+  );
 
   if (hasFbSession) {
-    console.log('✓ Facebook Marketplace: session found — FB scraper enabled');
+    console.log('✓ Facebook Marketplace: enabled');
   } else {
-    console.log('  Facebook Marketplace: no session found');
-    console.log('  → Run: npx ts-node fb-auth-setup.ts  to enable FB scraping');
+    console.log('  Facebook Marketplace: disabled (set FB_ENABLED=true to re-enable)');
   }
   console.log('');
 
