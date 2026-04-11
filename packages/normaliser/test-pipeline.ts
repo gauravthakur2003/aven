@@ -53,12 +53,34 @@ import { RawPayload }            from './src/types';
 const PAGE_DELAY_MS  = 1_200;  // ms between Kijiji page fetches (polite scraping)
 
 const KIJIJI_REGIONS = [
+  // ── GTA ──────────────────────────────────────────────────
   { label: 'Toronto',      url: 'https://www.kijiji.ca/b-cars-trucks/city-of-toronto/c174l1700273' },
   { label: 'Peel',         url: 'https://www.kijiji.ca/b-cars-trucks/mississauga-peel-region/c174l1700276' },
-  { label: 'York',         url: 'https://www.kijiji.ca/b-cars-trucks/markham-york-region/c174l1700277' },
-  { label: 'Durham',       url: 'https://www.kijiji.ca/b-cars-trucks/durham-region/c174l1700275' },
+  { label: 'York',         url: 'https://www.kijiji.ca/b-cars-trucks/markham-york-region/c174l1700274' },
+  { label: 'Durham',       url: 'https://www.kijiji.ca/b-cars-trucks/oshawa-durham-region/c174l1700275' },
   { label: 'Hamilton',     url: 'https://www.kijiji.ca/b-cars-trucks/hamilton/c174l80014' },
-  { label: 'Halton',       url: 'https://www.kijiji.ca/b-cars-trucks/oakville-halton-region/c174l1700278' },
+  { label: 'Halton',       url: 'https://www.kijiji.ca/b-cars-trucks/oakville-halton-region/c174l1700277' },
+  // ── Eastern Ontario ───────────────────────────────────────
+  { label: 'Ottawa',       url: 'https://www.kijiji.ca/b-cars-trucks/ottawa/c174l1700185' },
+  { label: 'Kingston',     url: 'https://www.kijiji.ca/b-cars-trucks/kingston-on/c174l1700183' },
+  { label: 'Belleville',   url: 'https://www.kijiji.ca/b-cars-trucks/belleville/c174l1700130' },
+  { label: 'Peterborough', url: 'https://www.kijiji.ca/b-cars-trucks/peterborough/c174l1700218' },
+  // ── Central Ontario ───────────────────────────────────────
+  { label: 'Barrie',       url: 'https://www.kijiji.ca/b-cars-trucks/barrie/c174l1700006' },
+  { label: 'Guelph',       url: 'https://www.kijiji.ca/b-cars-trucks/guelph/c174l1700242' },
+  { label: 'Kitchener',    url: 'https://www.kijiji.ca/b-cars-trucks/kitchener-waterloo/c174l1700212' },
+  { label: 'Cambridge',    url: 'https://www.kijiji.ca/b-cars-trucks/cambridge/c174l1700210' },
+  { label: 'Brantford',    url: 'https://www.kijiji.ca/b-cars-trucks/brantford/c174l1700206' },
+  { label: 'Niagara',      url: 'https://www.kijiji.ca/b-cars-trucks/st-catharines/c174l80016' },
+  // ── Southwest Ontario ─────────────────────────────────────
+  { label: 'London',       url: 'https://www.kijiji.ca/b-cars-trucks/london/c174l1700214' },
+  { label: 'Windsor',      url: 'https://www.kijiji.ca/b-cars-trucks/windsor-area-on/c174l1700220' },
+  { label: 'Sarnia',       url: 'https://www.kijiji.ca/b-cars-trucks/sarnia/c174l1700191' },
+  // ── Northern Ontario ──────────────────────────────────────
+  { label: 'Sudbury',      url: 'https://www.kijiji.ca/b-cars-trucks/sudbury/c174l1700245' },
+  { label: 'Thunder Bay',  url: 'https://www.kijiji.ca/b-cars-trucks/thunder-bay/c174l1700126' },
+  { label: 'Sault Ste Marie', url: 'https://www.kijiji.ca/b-cars-trucks/sault-ste-marie/c174l1700244' },
+  { label: 'North Bay',    url: 'https://www.kijiji.ca/b-cars-trucks/north-bay/c174l1700243' },
 ];
 
 // ── Queue backpressure ────────────────────────────────────
@@ -562,14 +584,18 @@ async function main(): Promise<void> {
     normaliserWorker(i, getPool(), provider),
   );
 
-  const hasFbSession = require('fs').existsSync(require('path').join(__dirname, 'fb-session.json'))
-    || !!process.env.FB_STORAGE_STATE;
+  // FB_ENABLED=true must be explicitly set to turn on Facebook scraping.
+  // Disabled by default — set FB_ENABLED=true in .env to re-enable.
+  const fbEnabled = process.env.FB_ENABLED === 'true';
+  const hasFbSession = fbEnabled && (
+    require('fs').existsSync(require('path').join(__dirname, 'fb-session.json'))
+    || !!process.env.FB_STORAGE_STATE
+  );
 
   if (hasFbSession) {
-    console.log('✓ Facebook Marketplace: session found — FB scraper enabled');
+    console.log('✓ Facebook Marketplace: enabled');
   } else {
-    console.log('  Facebook Marketplace: no session found');
-    console.log('  → Run: npx ts-node fb-auth-setup.ts  to enable FB scraping');
+    console.log('  Facebook Marketplace: disabled (set FB_ENABLED=true to re-enable)');
   }
   console.log('');
 
