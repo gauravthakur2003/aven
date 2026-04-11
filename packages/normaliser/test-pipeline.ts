@@ -52,7 +52,7 @@ import { RawPayload }            from './src/types';
 
 const PAGE_DELAY_MS      = 4_000;  // base ms between Kijiji page fetches
 const PAGE_DELAY_JITTER  = 3_000;  // + random 0–3s so requests don't cluster
-const REGION_CONCURRENCY = 5;      // max regions scraping simultaneously (avoids IP ban)
+// All 23 regions run in parallel, staggered 8s apart on startup (184s total spread)
 
 const KIJIJI_REGIONS = [
   // ── GTA ──────────────────────────────────────────────────
@@ -607,22 +607,8 @@ async function main(): Promise<void> {
   }
   console.log('');
 
-  // Run Kijiji scrapers with a concurrency cap — avoids IP rate-limiting when
-  // all 23 regions hammer Kijiji simultaneously from the same Railway IP.
-  const runRegions = async () => {
-    const sem = Array.from({ length: REGION_CONCURRENCY }, () => Promise.resolve());
-    let slotIdx = 0;
-    const tasks = KIJIJI_REGIONS.map((region) => {
-      const slot = slotIdx % REGION_CONCURRENCY;
-      slotIdx++;
-      sem[slot] = sem[slot].then(() => scraperLoop(pool, region));
-      return sem[slot];
-    });
-    await Promise.all(tasks);
-  };
-
   await Promise.all([
-    runRegions(),
+    ...KIJIJI_REGIONS.map((region, i) => scraperLoop(pool, region, i * 8_000)),
     ...(hasFbSession ? [fbScraperLoop(pool)] : []),
     dedupLoop(pool),
     ...workers,
