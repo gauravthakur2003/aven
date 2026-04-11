@@ -4,7 +4,7 @@
     "builder": "NIXPACKS"
   },
   "deploy": {
-    "startCommand": "npx playwright install chromium --with-deps && npm run pipeline",
+    "startCommand": "npm run pipeline",
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 5
   }
