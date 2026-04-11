@@ -92,8 +92,13 @@ const QUEUE_MAX      = 500;    // max pending payloads before scraper pauses
 const QUEUE_PAUSE_MS = 2000;   // how often to re-check queue size while paused
 
 // Each worker has its own dedicated provider so they never contend.
-// Worker 0 → Cerebras, Worker 1 → Groq, Worker 2 → Gemini Flash
-const WORKER_PROVIDERS = ['cerebras', 'groq', 'gemini'] as const;
+// Worker 0 → Cerebras, Worker 1 → Groq 8b-instant, Worker 2 → Gemini Flash, Worker 3 → Together AI
+const WORKER_PROVIDERS = [
+  'cerebras',
+  'groq',
+  'gemini',
+  ...(process.env.TOGETHER_API_KEY ? ['together'] : []),  // enabled when key is set
+] as const;
 const PROGRESS_EVERY   = 10;    // print a stats line every N normalisations
 
 // ── Shared state ──────────────────────────────────────────
@@ -371,10 +376,11 @@ async function fbScraperLoop(pool: any): Promise<void> {
 //                        5s = ~12 RPM — gives headroom for startup bursts.
 //   Anthropic paid key:  ~1000 RPM (varies by tier) — 1.5s is conservative.
 const PROVIDER_DELAY_MS: Record<string, number> = {
-  cerebras:  3_500,   // ~17 RPM — below 30 RPM cap; daily limit is the real bottleneck
-  groq:      3_500,   // ~17 RPM — sustainable all-day without hitting 14400 RPD ceiling
-  gemini:    5_000,   // ~12 RPM — comfortably under the 15 RPM free-tier hard limit
-  anthropic: 1_500,   // ~40 RPM — paid key; generous limits so we can run faster
+  cerebras:  2_000,   // ~30 RPM — at the free-tier cap; 8b model is fast enough
+  groq:      2_000,   // ~30 RPM — 8b-instant has 14400 RPD, sustainable at full speed
+  gemini:    4_000,   // ~15 RPM — right at the free-tier hard limit
+  together:    500,   // ~120 RPM — paid, no meaningful rate limit; run fast
+  anthropic: 1_500,   // ~40 RPM — paid key
 };
 
 async function normaliserWorker(id: number, pool: any, provider: string): Promise<void> {

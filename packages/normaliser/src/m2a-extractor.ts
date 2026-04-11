@@ -41,6 +41,10 @@ const GROQ_MODEL            = process.env.GROQ_MODEL ?? 'llama-3.1-8b-instant';
 const GROQ_BASE_URL         = 'https://api.groq.com/openai/v1';
 const CEREBRAS_MODEL        = process.env.CEREBRAS_MODEL ?? 'llama3.1-8b';
 const CEREBRAS_BASE_URL     = 'https://api.cerebras.ai/v1';
+// Together AI — OpenAI-compatible, paid, no meaningful rate limit
+// Llama-3.1-8B-Instruct-Turbo: $0.18/1M tokens, very fast inference
+const TOGETHER_MODEL        = process.env.TOGETHER_MODEL ?? 'meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo';
+const TOGETHER_BASE_URL     = 'https://api.together.xyz/v1';
 const MAX_TOKENS            = 1024;
 // Ollama serializes requests — queue wait + processing can exceed 2 min per request.
 // Cloud APIs (Anthropic/OpenAI/Gemini) are fast so 60s is plenty for them.
@@ -60,6 +64,7 @@ let _ollama:    OpenAI    | null = null;
 let _gemini:    OpenAI    | null = null;
 let _groq:      OpenAI    | null = null;
 let _cerebras:  OpenAI    | null = null;
+let _together:  OpenAI    | null = null;
 
 function getAnthropic(): Anthropic {
   if (!_anthropic) _anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: TIMEOUT_MS_CLOUD });
@@ -95,6 +100,12 @@ function getCerebras(): OpenAI {
   return _cerebras;
 }
 
+function getTogether(): OpenAI {
+  // Together AI — OpenAI-compatible, paid, no rate limit. $0.18/1M tokens.
+  if (!_together) _together = new OpenAI({ apiKey: process.env.TOGETHER_API_KEY ?? '', baseURL: TOGETHER_BASE_URL, timeout: TIMEOUT_MS_CLOUD });
+  return _together;
+}
+
 export interface ExtractionResult {
   fields:           ExtractedFields;
   model:            string;
@@ -118,6 +129,7 @@ export async function extractFields(
   if (provider === 'gemini')    return await callGemini(rawText);
   if (provider === 'groq')      return await callGroq(rawText);
   if (provider === 'cerebras')  return await callCerebras(rawText);
+  if (provider === 'together')  return await callTogether(rawText);
 
   // Default: Anthropic with OpenAI fallback
   try {
@@ -402,6 +414,28 @@ async function callCerebras(text: string): Promise<ExtractionResult> {
   const completionTokens = response.usage?.completion_tokens ?? 0;
 
   return { fields, model: `cerebras/${CEREBRAS_MODEL}`, promptTokens, completionTokens, latencyMs, normalisationVersion: NORMALISATION_VERSION };
+}
+
+async function callTogether(text: string): Promise<ExtractionResult> {
+  const t0 = Date.now();
+
+  const response = await getTogether().chat.completions.create({
+    model:       TOGETHER_MODEL,
+    max_tokens:  MAX_TOKENS,
+    temperature: 0,
+    messages: [
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user',   content: text },
+    ],
+  });
+
+  const latencyMs        = Date.now() - t0;
+  const rawJson          = response.choices[0]?.message?.content ?? '';
+  const fields           = parseJson(rawJson);
+  const promptTokens     = response.usage?.prompt_tokens     ?? 0;
+  const completionTokens = response.usage?.completion_tokens ?? 0;
+
+  return { fields, model: `together/${TOGETHER_MODEL}`, promptTokens, completionTokens, latencyMs, normalisationVersion: NORMALISATION_VERSION };
 }
 
 // ── JSON parsing ──────────────────────────────────────────
