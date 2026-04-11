@@ -36,7 +36,7 @@ import * as path from 'path';
 dotenv.config({ path: path.join(__dirname, '.env'), override: true });
 
 import axios from 'axios';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID as uuidv4 } from 'crypto';
 import { getPool, closePool } from './src/lib/db';
 import { extractFields, ExtractionResult } from './src/m2a-extractor';
 import { isFastPathEligible, fastPathExtract } from './src/m2a-fast-path';

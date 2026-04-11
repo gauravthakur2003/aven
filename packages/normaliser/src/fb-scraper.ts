@@ -34,7 +34,7 @@
  */
 
 import { chromium, Browser, BrowserContext, Page, Response as PWResponse } from 'playwright';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID as uuidv4 } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { RawPayload } from './types';
