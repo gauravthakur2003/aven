@@ -50,7 +50,7 @@ import { scrapeFacebook, FB_URL_VARIANTS } from './src/fb-scraper';
 import { runDeduplication }     from './src/deduplicator';
 import { RawPayload }            from './src/types';
 
-const PAGE_DELAY_MS  = 1_200;  // ms between Kijiji page fetches (polite scraping)
+const PAGE_DELAY_MS  = 3_000;  // ms between Kijiji page fetches (Railway IP needs more breathing room)
 
 const KIJIJI_REGIONS = [
   // ── GTA ──────────────────────────────────────────────────
