@@ -53,7 +53,7 @@ const TIMEOUT_MS_CLOUD  = 60_000;
 const RETRY_DELAY_MS    = 2_000;
 
 const SYSTEM_PROMPT = fs.readFileSync(
-  path.join(__dirname, '../../prompts/extraction-v1.0.txt'),
+  path.join(__dirname, '../prompts/extraction-v1.0.txt'),
   'utf-8',
 );
 
