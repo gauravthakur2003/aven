@@ -5,6 +5,11 @@ on:
   schedule:
     - cron: '0 4 * * *'
 
+  # Deploy immediately on every push to main
+  push:
+    branches:
+      - main
+
   # Also allows manual trigger from GitHub Actions tab
   workflow_dispatch:
     inputs:
