@@ -50,7 +50,9 @@ import { scrapeFacebook, FB_URL_VARIANTS } from './src/fb-scraper';
 import { runDeduplication }     from './src/deduplicator';
 import { RawPayload }            from './src/types';
 
-const PAGE_DELAY_MS  = 3_000;  // ms between Kijiji page fetches (Railway IP needs more breathing room)
+const PAGE_DELAY_MS      = 4_000;  // base ms between Kijiji page fetches
+const PAGE_DELAY_JITTER  = 3_000;  // + random 0–3s so requests don't cluster
+const REGION_CONCURRENCY = 5;      // max regions scraping simultaneously (avoids IP ban)
 
 const KIJIJI_REGIONS = [
   // ── GTA ──────────────────────────────────────────────────
@@ -264,7 +266,7 @@ async function scraperLoop(pool: any, region: { label: string; url: string }, st
     if (payloads.length === 0) {
       log(`[kj:${region.label}] page ${page} empty — wrapping to page 1`);
       page = 1;
-      await sleep(PAGE_DELAY_MS);
+      await sleep(PAGE_DELAY_MS + Math.floor(Math.random() * PAGE_DELAY_JITTER));
       continue;
     }
 
@@ -272,7 +274,7 @@ async function scraperLoop(pool: any, region: { label: string; url: string }, st
     const runFresh = payloads.filter(p => !seenUrls.has(p.listing_url));
     if (runFresh.length === 0) {
       page++;
-      await sleep(PAGE_DELAY_MS);
+      await sleep(PAGE_DELAY_MS + Math.floor(Math.random() * PAGE_DELAY_JITTER));
       continue;
     }
 
@@ -296,7 +298,7 @@ async function scraperLoop(pool: any, region: { label: string; url: string }, st
     }
 
     page++;
-    await sleep(PAGE_DELAY_MS);
+    await sleep(PAGE_DELAY_MS + Math.floor(Math.random() * PAGE_DELAY_JITTER));
   }
 
   log(`[kj:${region.label}] stopped`);
@@ -605,8 +607,22 @@ async function main(): Promise<void> {
   }
   console.log('');
 
+  // Run Kijiji scrapers with a concurrency cap — avoids IP rate-limiting when
+  // all 23 regions hammer Kijiji simultaneously from the same Railway IP.
+  const runRegions = async () => {
+    const sem = Array.from({ length: REGION_CONCURRENCY }, () => Promise.resolve());
+    let slotIdx = 0;
+    const tasks = KIJIJI_REGIONS.map((region) => {
+      const slot = slotIdx % REGION_CONCURRENCY;
+      slotIdx++;
+      sem[slot] = sem[slot].then(() => scraperLoop(pool, region));
+      return sem[slot];
+    });
+    await Promise.all(tasks);
+  };
+
   await Promise.all([
-    ...KIJIJI_REGIONS.map((region, i) => scraperLoop(pool, region, i * 3_000)),
+    runRegions(),
     ...(hasFbSession ? [fbScraperLoop(pool)] : []),
     dedupLoop(pool),
     ...workers,
