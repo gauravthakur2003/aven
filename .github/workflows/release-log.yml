@@ -1,0 +1,47 @@
+name: Generate Release Log
+
+on:
+  push:
+    branches:
+      - main   # runs on every push/merge to main
+
+jobs:
+  release-log:
+    name: Write Release Log
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write   # needed to commit the release log back to the repo
+
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0     # full history so we can diff against previous release
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Generate release log
+        run: node scripts/generate-release-log.js
+        env:
+          GITHUB_SHA:        ${{ github.sha }}
+          GITHUB_REF_NAME:   ${{ github.ref_name }}
+          GITHUB_ACTOR:      ${{ github.actor }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+
+      - name: Commit release log
+        run: |
+          git config user.name  "Aven Release Bot"
+          git config user.email "bot@aven.ca"
+          git add release_logs/
+          # Only commit if there's actually a new file
+          if git diff --cached --quiet; then
+            echo "No new release log to commit."
+          else
+            git commit -m "chore: release log $(date '+%Y-%m-%d') [skip ci]"
+            git push origin main
+          fi

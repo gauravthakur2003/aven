@@ -38,7 +38,7 @@ import express      from 'express';
 import { Pool }     from 'pg';
 
 const PORT       = parseInt(process.env.PORT ?? '3030', 10);
-const REFRESH_MS = 10_000;
+const REFRESH_MS = 60_000;
 const PAGE_SIZE  = 50;
 
 if (!process.env.DATABASE_URL) {
@@ -62,6 +62,55 @@ app.use((_req, res, next) => {
   res.setHeader('Pragma', 'no-cache');
   next();
 });
+
+// ── Ontario Region Classifier ─────────────────────────────
+// Maps a city name to a broad Ontario region for customer-facing location filtering.
+
+const ONTARIO_REGIONS: Record<string, string> = {
+  // GTA
+  'toronto': 'GTA', 'scarborough': 'GTA', 'etobicoke': 'GTA', 'north york': 'GTA',
+  'mississauga': 'GTA', 'brampton': 'GTA', 'caledon': 'GTA',
+  'markham': 'GTA', 'vaughan': 'GTA', 'richmond hill': 'GTA', 'aurora': 'GTA',
+  'newmarket': 'GTA', 'king': 'GTA', 'whitchurch-stouffville': 'GTA',
+  'oshawa': 'GTA', 'ajax': 'GTA', 'pickering': 'GTA', 'whitby': 'GTA',
+  'durham': 'GTA', 'clarington': 'GTA', 'uxbridge': 'GTA',
+  'oakville': 'GTA', 'burlington': 'GTA', 'halton hills': 'GTA', 'milton': 'GTA',
+  // Central Ontario
+  'hamilton': 'Central Ontario', 'stoney creek': 'Central Ontario',
+  'guelph': 'Central Ontario',
+  'kitchener': 'Central Ontario', 'waterloo': 'Central Ontario',
+  'cambridge': 'Central Ontario',
+  'brantford': 'Central Ontario', 'brant': 'Central Ontario',
+  'st. catharines': 'Central Ontario', 'niagara': 'Central Ontario',
+  'niagara falls': 'Central Ontario', 'welland': 'Central Ontario',
+  'barrie': 'Central Ontario', 'innisfil': 'Central Ontario', 'collingwood': 'Central Ontario',
+  'orillia': 'Central Ontario', 'midland': 'Central Ontario',
+  // Eastern Ontario
+  'ottawa': 'Eastern Ontario', 'gatineau': 'Eastern Ontario',
+  'kingston': 'Eastern Ontario', 'belleville': 'Eastern Ontario',
+  'peterborough': 'Eastern Ontario', 'cobourg': 'Eastern Ontario',
+  'trenton': 'Eastern Ontario', 'brockville': 'Eastern Ontario',
+  'cornwall': 'Eastern Ontario', 'pembroke': 'Eastern Ontario',
+  // Southwest Ontario
+  'london': 'Southwest Ontario', 'st. thomas': 'Southwest Ontario',
+  'windsor': 'Southwest Ontario', 'chatham': 'Southwest Ontario',
+  'sarnia': 'Southwest Ontario', 'leamington': 'Southwest Ontario',
+  'strathroy': 'Southwest Ontario', 'woodstock': 'Southwest Ontario',
+  'tillsonburg': 'Southwest Ontario', 'ingersoll': 'Southwest Ontario',
+  // Northern Ontario
+  'sudbury': 'Northern Ontario', 'greater sudbury': 'Northern Ontario',
+  'thunder bay': 'Northern Ontario',
+  'sault ste. marie': 'Northern Ontario', 'sault ste marie': 'Northern Ontario',
+  'north bay': 'Northern Ontario', 'timmins': 'Northern Ontario',
+  'kapuskasing': 'Northern Ontario', 'kenora': 'Northern Ontario',
+  'elliot lake': 'Northern Ontario',
+};
+
+export function getOntarioRegion(city: string | null): string {
+  if (!city) return 'Ontario';
+  const key = city.toLowerCase().trim();
+  return ONTARIO_REGIONS[key] ?? 'Ontario';
+}
 
 // ── Types ─────────────────────────────────────────────────
 
@@ -222,13 +271,14 @@ interface BrowseOptions {
   makes: string[];
   body_types: string[];
   cities: string[];
+  regions: string[];
 }
 
 interface BrowseListing {
   id: string;
   make: string; model: string; year: number; trim: string | null;
   price: number | null; price_type: string; mileage_km: number | null;
-  city: string; province: string | null;
+  city: string; province: string | null; region: string;
   source_id: string; source_url: string;
   photo_urls: string[] | null;
   body_type: string | null; colour_exterior: string | null;
@@ -242,7 +292,7 @@ interface BrowseFilters {
   make: string; model: string;
   min_year: number; max_year: number;
   min_price: number; max_price: number;
-  body_type: string; city: string; source: string;
+  body_type: string; city: string; region: string; source: string;
   page: number;
   sort: string;
 }
@@ -257,10 +307,13 @@ async function fetchBrowseOptions(): Promise<BrowseOptions> {
       client.query(`SELECT DISTINCT body_type FROM listings WHERE status='active' AND body_type IS NOT NULL ORDER BY body_type`),
       client.query(`SELECT DISTINCT city FROM listings WHERE status='active' AND city IS NOT NULL AND city != 'Unknown' ORDER BY city`),
     ]);
+    const cities = cityRes.rows.map(r => r.city as string);
+    const regions = [...new Set(cities.map(c => getOntarioRegion(c)))].sort();
     return {
       makes:      makesRes.rows.map(r => r.make),
       body_types: bodyRes.rows.map(r => r.body_type),
-      cities:     cityRes.rows.map(r => r.city),
+      cities,
+      regions,
     };
   } finally {
     client.release();
@@ -315,7 +368,9 @@ async function fetchBrowseListings(f: BrowseFilters): Promise<{ rows: BrowseList
           AND ($9 = '' OR source_id = $9)
       `, [f.make, f.model, f.min_year, f.max_year, f.min_price, f.max_price, f.body_type, f.city, f.source]),
     ]);
-    return { rows: dataRes.rows, total: Number(countRes.rows[0].total) };
+    // Attach computed region to each row
+    const rows = dataRes.rows.map(r => ({ ...r, region: getOntarioRegion(r.city) }));
+    return { rows, total: Number(countRes.rows[0].total) };
   } finally {
     client.release();
   }
@@ -1630,6 +1685,10 @@ function buildBrowseHtml(opts: BrowseOptions, rows: BrowseListing[], total: numb
     `<option value="${c.replace(/"/g, '&quot;')}"${f.city.toLowerCase() === c.toLowerCase() ? ' selected' : ''}>${c}</option>`
   ).join('');
 
+  const regionOptions = opts.regions.map(r =>
+    `<option value="${r.replace(/"/g, '&quot;')}"${f.region === r ? ' selected' : ''}>${r}</option>`
+  ).join('');
+
   const srcActive = (val: string) => f.source === val ? ' active' : '';
 
   // ── Active filter chips ──
@@ -1642,6 +1701,7 @@ function buildBrowseHtml(opts: BrowseOptions, rows: BrowseListing[], total: numb
   if (f.min_price) chips.push(`<span class="b-chip">Min $${f.min_price.toLocaleString('en-CA')} <a href="${chipLink({ min_price: 0 })}" title="Remove">&#x2715;</a></span>`);
   if (f.max_price) chips.push(`<span class="b-chip">Max $${f.max_price.toLocaleString('en-CA')} <a href="${chipLink({ max_price: 0 })}" title="Remove">&#x2715;</a></span>`);
   if (f.body_type) chips.push(`<span class="b-chip">${esc(f.body_type)} <a href="${chipLink({ body_type: '' })}" title="Remove">&#x2715;</a></span>`);
+  if (f.region)    chips.push(`<span class="b-chip">📍 ${esc(f.region)} <a href="${chipLink({ region: '' })}" title="Remove">&#x2715;</a></span>`);
   if (f.city)      chips.push(`<span class="b-chip">${esc(f.city)} <a href="${chipLink({ city: '' })}" title="Remove">&#x2715;</a></span>`);
   if (f.source)    chips.push(`<span class="b-chip">${f.source === 'kijiji-ca' ? 'Kijiji' : 'Facebook'} <a href="${chipLink({ source: '' })}" title="Remove">&#x2715;</a></span>`);
 
@@ -1661,6 +1721,7 @@ function buildBrowseHtml(opts: BrowseOptions, rows: BrowseListing[], total: numb
           : `<div class="b-card-price no-price">Price not listed</div>`;
         const mileage  = r.mileage_km != null ? `${Number(r.mileage_km).toLocaleString('en-CA')} km` : null;
         const location = [r.city, r.province].filter(Boolean).join(', ');
+        const region   = r.region && r.region !== 'Ontario' ? r.region : null;
         // Determine if listing is new (within last 24 hours)
         const isNew = r.created_at && (now - new Date(r.created_at).getTime()) < 86_400_000;
         const newBadge = isNew ? `<div class="b-new-badge"><span class="b-new-dot"></span>NEW</div>` : '';
@@ -1688,7 +1749,8 @@ function buildBrowseHtml(opts: BrowseOptions, rows: BrowseListing[], total: numb
             ${priceHtml}
             <div class="b-card-meta">
               ${mileage ? `<span>${mileage}</span><span class="b-card-meta-sep">·</span>` : ''}
-              <span>${location}</span>
+              <span>📍 ${location}</span>
+              ${region ? `<span class="b-card-meta-sep">·</span><span style="font-size:11px;color:#6B7280;">${region}</span>` : ''}
             </div>
             ${verifiedBadge}${limitedTag}
             ${browseSourcePill(r.source_id)}
@@ -1809,6 +1871,14 @@ function buildBrowseHtml(opts: BrowseOptions, rows: BrowseListing[], total: numb
             <select name="body_type">
               <option value="">All Types</option>
               ${bodyOptions}
+            </select>
+          </div>
+
+          <div class="b-field">
+            <label>Region</label>
+            <select name="region">
+              <option value="">All Ontario</option>
+              ${regionOptions}
             </select>
           </div>
 
@@ -2401,6 +2471,7 @@ app.get('/browse', async (req, res) => {
       max_price: parseInt(String(req.query.max_price ?? '0'), 10)  || 0,
       body_type: String(req.query.body_type ?? ''),
       city:      String(req.query.city      ?? ''),
+      region:    String(req.query.region    ?? ''),
       source:    String(req.query.source    ?? ''),
       page:      Math.max(1, parseInt(String(req.query.page ?? '1'), 10)),
       sort:      Object.prototype.hasOwnProperty.call(BROWSE_SORT_MAP, rawSort) ? rawSort : 'newest',
