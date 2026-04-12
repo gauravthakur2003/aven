@@ -114,6 +114,63 @@ const packagesTouched = [...new Set(
   }).filter(Boolean)
 )].join(', ');
 
+// ── Plain English Summary ─────────────────────────────────────────────────────
+
+/**
+ * Strips the conventional-commit prefix and expands common abbreviations
+ * so the subject reads naturally to a non-technical audience.
+ */
+function humanise(subject) {
+  let s = subject
+    .replace(/^(feat|fix|perf|chore|docs|test|refactor|ci|style|build)(\([^)]+\))?:\s*/i, '')
+    .trim();
+
+  // Capitalise first letter
+  s = s.charAt(0).toUpperCase() + s.slice(1);
+
+  // Expand abbreviations
+  s = s
+    .replace(/\bRPM\b/g, 'requests/min')
+    .replace(/\bLLM(s)?\b/g, 'AI model$1')
+    .replace(/\bDB\b/g, 'database')
+    .replace(/\bms\b/g, 'milliseconds')
+    .replace(/\bUA\b/g, 'user-agent')
+    .replace(/\bESM\b/g, 'module format')
+    .replace(/\bIPv[46]\b/g, match => match)   // keep as-is
+    .replace(/→/g, 'to');
+
+  return s;
+}
+
+// Filter out noise (merge commits, bot-generated release logs)
+const meaningful = rawCommits.filter(c =>
+  c.subject &&
+  !c.subject.toLowerCase().includes('[skip ci]') &&
+  !/^merge branch/i.test(c.subject)
+);
+
+const byType = {
+  added:    meaningful.filter(c => /^feat/i.test(c.subject)),
+  improved: meaningful.filter(c => /^perf|^refactor/i.test(c.subject)),
+  fixed:    meaningful.filter(c => /^fix/i.test(c.subject)),
+  infra:    meaningful.filter(c => /^chore|^ci|^build/i.test(c.subject)),
+  docs:     meaningful.filter(c => /^docs/i.test(c.subject)),
+};
+const categorised = Object.values(byType).flat();
+byType.other = meaningful.filter(c => !categorised.includes(c));
+
+let plainEnglishLines = [];
+if (byType.added.length)    plainEnglishLines.push(`**Added:** ${byType.added.map(c => humanise(c.subject)).join('; ')}.`);
+if (byType.improved.length) plainEnglishLines.push(`**Improved:** ${byType.improved.map(c => humanise(c.subject)).join('; ')}.`);
+if (byType.fixed.length)    plainEnglishLines.push(`**Fixed:** ${byType.fixed.map(c => humanise(c.subject)).join('; ')}.`);
+if (byType.infra.length)    plainEnglishLines.push(`**Maintenance:** ${byType.infra.map(c => humanise(c.subject)).join('; ')}.`);
+if (byType.docs.length)     plainEnglishLines.push(`**Docs:** ${byType.docs.map(c => humanise(c.subject)).join('; ')}.`);
+if (byType.other.length)    plainEnglishLines.push(`**Other:** ${byType.other.map(c => humanise(c.subject)).join('; ')}.`);
+
+const plainEnglish = plainEnglishLines.length > 0
+  ? plainEnglishLines.join('\n')
+  : '_No significant code changes in this release (automated or merge commit only)._';
+
 // ── Build markdown ─────────────────────────────────────────────────────────────
 
 const ghBase = `https://github.com/${repo}`;
@@ -128,6 +185,11 @@ md += `**Author:** ${actor}  \n`;
 md += `**Released:** ${nowUtc()}  \n`;
 md += `**Packages touched:** ${packagesTouched || 'various'}  \n`;
 md += '\n---\n\n';
+
+// Plain English summary — for PMs and non-technical readers
+md += `## 📝 What Changed (Plain English)\n\n`;
+md += `${plainEnglish}\n\n`;
+md += `---\n\n`;
 
 // Summary stats
 if (diffStat) {
