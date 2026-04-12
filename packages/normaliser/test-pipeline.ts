@@ -50,11 +50,9 @@ import { scrapeFacebook, FB_URL_VARIANTS } from './src/fb-scraper';
 import { runDeduplication }     from './src/deduplicator';
 import { RawPayload }            from './src/types';
 
-const PAGE_DELAY_MS      = 5_000;  // base ms between Kijiji page fetches
-const PAGE_DELAY_JITTER  = 5_000;  // + random 0–5s jitter so 23 scrapers don't cluster
-const RETRY_429_MIN_MS   = 45_000; // min wait after a 429 (45s)
-const RETRY_429_JITTER   = 75_000; // + random 0–75s → total 45–120s, breaks sync loops
-// All 23 regions run in parallel, staggered 15s apart on startup (345s = ~6min spread)
+const RETRY_429_MIN_MS   = 60_000; // min wait after a 429 (60s)
+const RETRY_429_JITTER   = 60_000; // + random 0–60s → total 60–120s
+// All 23 regions run in parallel, staggered 3s apart (gate controls actual Kijiji rate)
 
 const KIJIJI_REGIONS = [
   // ── GTA ──────────────────────────────────────────────────
@@ -133,6 +131,40 @@ process.on('SIGINT', () => {
   }
 });
 
+// ── Global Kijiji rate gate ───────────────────────────────
+// All 23 scrapers share a single token bucket so the total
+// request rate to Kijiji never exceeds KIJIJI_RPM regardless
+// of how many regions are active.
+const KIJIJI_RPM        = 6;   // max requests/min to Kijiji from this IP
+const KIJIJI_MIN_GAP_MS = Math.ceil(60_000 / KIJIJI_RPM); // = 10s between requests
+let   _lastKijijiReq    = 0;
+const _kijijiQueue: Array<() => void> = [];
+let   _kijijiGateRunning = false;
+
+function _runKijijiGate() {
+  if (_kijijiGateRunning) return;
+  _kijijiGateRunning = true;
+  const tick = () => {
+    if (_kijijiQueue.length === 0) { _kijijiGateRunning = false; return; }
+    const now  = Date.now();
+    const wait = Math.max(0, _lastKijijiReq + KIJIJI_MIN_GAP_MS - now);
+    setTimeout(() => {
+      _lastKijijiReq = Date.now();
+      const resolve = _kijijiQueue.shift()!;
+      resolve();
+      tick();
+    }, wait);
+  };
+  tick();
+}
+
+function kijijiRequest(): Promise<void> {
+  return new Promise(resolve => {
+    _kijijiQueue.push(resolve);
+    _runKijijiGate();
+  });
+}
+
 // ── Helpers ───────────────────────────────────────────────
 
 function sleep(ms: number): Promise<void> {
@@ -176,6 +208,9 @@ async function scraperLoop(pool: any, region: { label: string; url: string }, st
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0',
     ];
     const ua = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+
+    // Wait for global rate gate before hitting Kijiji
+    await kijijiRequest();
 
     try {
       const res = await axios.get(url, {
@@ -281,7 +316,7 @@ async function scraperLoop(pool: any, region: { label: string; url: string }, st
     if (payloads.length === 0) {
       log(`[kj:${region.label}] page ${page} empty — wrapping to page 1`);
       page = 1;
-      await sleep(PAGE_DELAY_MS + Math.floor(Math.random() * PAGE_DELAY_JITTER));
+      // (rate controlled by global kijijiRequest gate)
       continue;
     }
 
@@ -289,7 +324,7 @@ async function scraperLoop(pool: any, region: { label: string; url: string }, st
     const runFresh = payloads.filter(p => !seenUrls.has(p.listing_url));
     if (runFresh.length === 0) {
       page++;
-      await sleep(PAGE_DELAY_MS + Math.floor(Math.random() * PAGE_DELAY_JITTER));
+      // (rate controlled by global kijijiRequest gate)
       continue;
     }
 
@@ -313,7 +348,7 @@ async function scraperLoop(pool: any, region: { label: string; url: string }, st
     }
 
     page++;
-    await sleep(PAGE_DELAY_MS + Math.floor(Math.random() * PAGE_DELAY_JITTER));
+    // (rate controlled by global kijijiRequest gate)
   }
 
   log(`[kj:${region.label}] stopped`);
@@ -623,7 +658,7 @@ async function main(): Promise<void> {
   console.log('');
 
   await Promise.all([
-    ...KIJIJI_REGIONS.map((region, i) => scraperLoop(pool, region, i * 15_000)),
+    ...KIJIJI_REGIONS.map((region, i) => scraperLoop(pool, region, i * 3_000)),
     ...(hasFbSession ? [fbScraperLoop(pool)] : []),
     dedupLoop(pool),
     ...workers,
