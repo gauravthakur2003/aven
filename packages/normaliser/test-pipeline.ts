@@ -135,7 +135,7 @@ process.on('SIGINT', () => {
 // All 23 scrapers share a single token bucket so the total
 // request rate to Kijiji never exceeds KIJIJI_RPM regardless
 // of how many regions are active.
-const KIJIJI_RPM        = 6;   // max requests/min to Kijiji from this IP
+const KIJIJI_RPM        = 10;  // max requests/min to Kijiji from this IP
 const KIJIJI_MIN_GAP_MS = Math.ceil(60_000 / KIJIJI_RPM); // = 10s between requests
 let   _lastKijijiReq    = 0;
 const _kijijiQueue: Array<() => void> = [];
