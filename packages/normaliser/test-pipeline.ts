@@ -135,8 +135,10 @@ process.on('SIGINT', () => {
 // All 23 scrapers share a single token bucket so the total
 // request rate to Kijiji never exceeds KIJIJI_RPM regardless
 // of how many regions are active.
-const KIJIJI_RPM        = 10;  // max requests/min to Kijiji from this IP
-const KIJIJI_MIN_GAP_MS = Math.ceil(60_000 / KIJIJI_RPM); // = 10s between requests
+const KIJIJI_RPM        = 15;  // max requests/min to Kijiji from this IP (~80% of safe limit)
+const KIJIJI_MIN_GAP_MS = Math.ceil(60_000 / KIJIJI_RPM); // = 4s between requests
+const INDB_COOLDOWN_MS  = 20 * 60 * 1000; // 20 min cooldown after N consecutive all-in-DB pages
+const INDB_THRESHOLD    = 4;              // consecutive all-in-DB pages before cooldown
 let   _lastKijijiReq    = 0;
 const _kijijiQueue: Array<() => void> = [];
 let   _kijijiGateRunning = false;
@@ -190,6 +192,7 @@ function printStatus(): void {
 async function scraperLoop(pool: any, region: { label: string; url: string }, staggerMs = 0): Promise<void> {
   if (staggerMs > 0) await sleep(staggerMs);
   let page = 1;
+  let consecutiveInDb = 0; // tracks how many pages in a row were all-in-DB
 
   while (!stopping) {
     // Backpressure — pause if queue is too large
@@ -340,11 +343,21 @@ async function scraperLoop(pool: any, region: { label: string; url: string }, st
 
     stats.scraped += payloads.length;
     if (fresh.length > 0) {
+      consecutiveInDb = 0; // reset — found new listings
       queue.push(...fresh);
       stats.queued += fresh.length;
       log(`[kj:${region.label}] page ${page}  ${payloads.length} scraped  →  ${fresh.length} new queued  (queue: ${queue.length})`);
     } else {
+      consecutiveInDb++;
       log(`[kj:${region.label}] page ${page}  ${payloads.length} scraped  →  all already in DB`);
+      // If this region keeps returning nothing new, back off and let fresh regions use the gate
+      if (consecutiveInDb >= INDB_THRESHOLD) {
+        log(`[kj:${region.label}] ${consecutiveInDb} pages all in DB — cooling down ${INDB_COOLDOWN_MS / 60000}min`);
+        consecutiveInDb = 0;
+        page = 1;
+        await sleep(INDB_COOLDOWN_MS);
+        continue;
+      }
     }
 
     page++;
