@@ -50,8 +50,8 @@ import { scrapeFacebook, FB_URL_VARIANTS } from './src/fb-scraper';
 import { runDeduplication }     from './src/deduplicator';
 import { RawPayload }            from './src/types';
 
-const RETRY_429_MIN_MS   = 60_000; // min wait after a 429 (60s)
-const RETRY_429_JITTER   = 60_000; // + random 0–60s → total 60–120s
+const RETRY_429_MIN_MS   = 90_000; // min wait after a 429 (90s) — bumped to match higher RPM
+const RETRY_429_JITTER   = 90_000; // + random 0–90s → total 90–180s
 // All 23 regions run in parallel, staggered 3s apart (gate controls actual Kijiji rate)
 
 const KIJIJI_REGIONS = [
@@ -135,10 +135,14 @@ process.on('SIGINT', () => {
 // All 23 scrapers share a single token bucket so the total
 // request rate to Kijiji never exceeds KIJIJI_RPM regardless
 // of how many regions are active.
-const KIJIJI_RPM        = 15;  // max requests/min to Kijiji from this IP (~80% of safe limit)
-const KIJIJI_MIN_GAP_MS = Math.ceil(60_000 / KIJIJI_RPM); // = 4s between requests
-const INDB_COOLDOWN_MS  = 20 * 60 * 1000; // 20 min cooldown after N consecutive all-in-DB pages
-const INDB_THRESHOLD    = 4;              // consecutive all-in-DB pages before cooldown
+const KIJIJI_RPM        = 25;  // max requests/min to Kijiji (~80% of safe ~30 RPM limit)
+const KIJIJI_MIN_GAP_MS = Math.ceil(60_000 / KIJIJI_RPM); // = 2400ms between requests
+// Exhausted-region cooldown: exponential backoff so GTA regions (fully scraped)
+// park themselves progressively longer, freeing gate bandwidth for fresh Ontario regions.
+//   cooldownCount=0 → 1h, =1 → 2h, =2 → 4h, =3+ → 6h cap
+const INDB_COOLDOWN_BASE_MS = 60 * 60 * 1000;      // 1h base (was flat 20min)
+const INDB_COOLDOWN_MAX_MS  = 6 * 60 * 60 * 1000;  // 6h cap
+const INDB_THRESHOLD        = 2;  // consecutive all-in-DB pages before cooldown (was 4)
 let   _lastKijijiReq    = 0;
 const _kijijiQueue: Array<() => void> = [];
 let   _kijijiGateRunning = false;
@@ -193,6 +197,8 @@ async function scraperLoop(pool: any, region: { label: string; url: string }, st
   if (staggerMs > 0) await sleep(staggerMs);
   let page = 1;
   let consecutiveInDb = 0; // tracks how many pages in a row were all-in-DB
+  let cooldownCount   = 0; // how many exhaustion cooldowns this region has hit this run
+                           // drives exponential backoff: 1h → 2h → 4h → 6h cap
 
   while (!stopping) {
     // Backpressure — pause if queue is too large
@@ -344,18 +350,26 @@ async function scraperLoop(pool: any, region: { label: string; url: string }, st
     stats.scraped += payloads.length;
     if (fresh.length > 0) {
       consecutiveInDb = 0; // reset — found new listings
+      cooldownCount   = 0; // reset exponential backoff — region is alive again
       queue.push(...fresh);
       stats.queued += fresh.length;
       log(`[kj:${region.label}] page ${page}  ${payloads.length} scraped  →  ${fresh.length} new queued  (queue: ${queue.length})`);
     } else {
       consecutiveInDb++;
       log(`[kj:${region.label}] page ${page}  ${payloads.length} scraped  →  all already in DB`);
-      // If this region keeps returning nothing new, back off and let fresh regions use the gate
+      // Exponential backoff: each exhaustion cycle parks the region twice as long.
+      // This frees gate bandwidth for fresh Ontario regions (London, Ottawa, Windsor, etc.)
+      // while ensuring GTA still wakes up periodically to catch newly posted cars.
       if (consecutiveInDb >= INDB_THRESHOLD) {
-        log(`[kj:${region.label}] ${consecutiveInDb} pages all in DB — cooling down ${INDB_COOLDOWN_MS / 60000}min`);
+        const cooldownMs = Math.min(
+          INDB_COOLDOWN_BASE_MS * Math.pow(2, cooldownCount),
+          INDB_COOLDOWN_MAX_MS,
+        );
+        log(`[kj:${region.label}] exhausted — cooldown #${cooldownCount + 1}: ${Math.round(cooldownMs / 60000)}min (next: ${Math.round(Math.min(cooldownMs * 2, INDB_COOLDOWN_MAX_MS) / 60000)}min if still empty)`);
+        cooldownCount++;
         consecutiveInDb = 0;
         page = 1;
-        await sleep(INDB_COOLDOWN_MS);
+        await sleep(cooldownMs);
         continue;
       }
     }
