@@ -19,6 +19,8 @@ export interface RawPayload {
   proxy_used:        boolean;
   requires_auth:     boolean;
   is_dealer_listing: boolean | null;
+  /** Set to true when the listing's detail page was fetched to fill in missing fields. */
+  _advancedScrape?:  boolean;
 }
 
 // ── M2a output: raw LLM extraction result ─────────────────

@@ -195,6 +195,101 @@ function printStatus(): void {
   );
 }
 
+// ── Advanced detail-page scraper ─────────────────────────
+// Called for "thin" listings that are missing make/model/year or price
+// in the search-results Apollo blob. Fetches the individual listing page
+// (which contains a richer __NEXT_DATA__ payload) and merges the extra
+// fields back into the existing raw_content JSON.
+//
+// Also collects up to 10 image URLs (vs 5 from search results), which
+// enables the vision colour-detection step in the normaliser worker.
+//
+// Rate-gated through kijijiRequest() so detail fetches count against the
+// same 25 RPM global budget as search-page requests.
+
+function isThinPayload(p: RawPayload): boolean {
+  const raw = JSON.parse(p.raw_content) as any;
+  const missingCore = !raw.make || !raw.model || !raw.year;
+  const missingPrice = raw.priceCents == null && !raw.mileageKm;
+  return missingCore || missingPrice;
+}
+
+async function fetchDetailPage(payload: RawPayload, ua: string, regionLabel: string): Promise<RawPayload> {
+  try {
+    await kijijiRequest(); // counts against global rate budget
+    const res = await axios.get(payload.listing_url, {
+      headers: { 'User-Agent': ua, 'Accept-Language': 'en-CA,en;q=0.9', 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
+      timeout: 20_000,
+    });
+
+    const scriptMatch = (res.data as string).match(/<script id="__NEXT_DATA__"[^>]*>(.*?)<\/script>/s);
+    if (!scriptMatch) return payload;
+
+    const nextData = JSON.parse(scriptMatch[1]) as any;
+    // Detail page structure: pageProps.adDetails or pageProps.ad
+    const ad = nextData?.props?.pageProps?.adDetails ?? nextData?.props?.pageProps?.ad;
+    if (!ad) return payload;
+
+    const attrs: Record<string, string> = {};
+    for (const a of (ad.attributes?.all ?? ad.adAttributes ?? [])) {
+      const key = a.canonicalName ?? a.machineKey;
+      const val = a.canonicalValues?.[0] ?? a.value;
+      if (key && val != null) attrs[key] = String(val);
+    }
+
+    const TRANS_MAP: Record<string, string> = { '1': 'Manual', '2': 'Automatic', '3': 'CVT' };
+    const BODY_MAP: Record<string, string> = {
+      sedan: 'Sedan', suvcrossover: 'SUV/Crossover', hatchback: 'Hatchback',
+      pickuptruck: 'Pickup Truck', convertible: 'Convertible', coupe: 'Coupe',
+      minivan: 'Minivan', wagon: 'Wagon', van: 'Van',
+    };
+
+    const existing = JSON.parse(payload.raw_content) as any;
+
+    // Merge — only fill in fields that were missing in the search-results blob
+    const merged = {
+      ...existing,
+      title:       existing.title       ?? ad.title,
+      description: existing.description ?? ad.description,
+      priceCents:  existing.priceCents  ?? ad.price?.amount,
+      year:        existing.year        ?? (attrs['caryear'] ? parseInt(attrs['caryear'], 10) : ad.vehicleInformation?.years?.[0]),
+      make:        existing.make        ?? ((attrs['carmake']  && attrs['carmake']  !== 'othrmake') ? attrs['carmake']  : ad.vehicleInformation?.make),
+      model:       existing.model       ?? ((attrs['carmodel'] && attrs['carmodel'] !== 'othrmdl')  ? attrs['carmodel'] : ad.vehicleInformation?.model),
+      trim:        existing.trim        ?? attrs['cartrim']         ?? ad.vehicleInformation?.trim,
+      mileageKm:   existing.mileageKm   ?? (attrs['carmileageinkms'] ? parseInt(attrs['carmileageinkms'], 10) : ad.vehicleInformation?.mileage),
+      colour:      existing.colour      ?? attrs['carcolor']        ?? ad.vehicleInformation?.colour,
+      colourInterior: existing.colourInterior ?? attrs['carinteriorcolor'],
+      bodyType:    existing.bodyType    ?? BODY_MAP[attrs['carbodytype'] ?? ''] ?? attrs['carbodytype'] ?? ad.vehicleInformation?.bodyType,
+      drivetrain:  existing.drivetrain  ?? ((attrs['drivetrain'] && attrs['drivetrain'] !== 'other') ? attrs['drivetrain'] : ad.vehicleInformation?.drivetrain),
+      fuelType:    existing.fuelType    ?? attrs['carfueltype']     ?? ad.vehicleInformation?.fuelType,
+      transmission:existing.transmission ?? TRANS_MAP[attrs['cartransmission'] ?? ''] ?? ad.vehicleInformation?.transmission,
+      doors:       existing.doors       ?? (attrs['noofdoors']  ? parseInt(attrs['noofdoors'], 10)  : undefined),
+      seats:       existing.seats       ?? (attrs['noofseats']  ? parseInt(attrs['noofseats'], 10)  : undefined),
+      vin:         existing.vin         ?? attrs['vin']             ?? ad.vehicleInformation?.vin,
+      condition:   existing.condition   ?? attrs['vehicletype'],
+      location:    existing.location    ?? ad.location?.address     ?? ad.location?.name,
+      _sellerType: existing._sellerType ?? attrs['forsaleby'],
+    };
+
+    // Collect up to 10 images from the detail page (search results only has 5)
+    const detailImages: string[] = (ad.imageUrls ?? ad.images?.map((i: any) => i.url) ?? []).slice(0, 10);
+    const mergedImages = detailImages.length > payload.listing_images.length ? detailImages : payload.listing_images;
+
+    log(`[kj:${regionLabel}] advanced scrape: ${merged.year ?? '?'} ${merged.make ?? '?'} ${merged.model ?? '?'} — filled missing fields`);
+
+    return {
+      ...payload,
+      raw_content:    JSON.stringify(merged),
+      listing_images: mergedImages,
+      _advancedScrape: true,
+    };
+  } catch (err) {
+    // Non-fatal: return original payload, pipeline will handle thin data as usual
+    log(`[kj:${regionLabel}] advanced scrape failed for ${payload.listing_url}: ${(err as Error).message.slice(0, 80)}`);
+    return payload;
+  }
+}
+
 // ── Scraper loop ──────────────────────────────────────────
 
 async function scraperLoop(pool: any, region: { label: string; url: string }, staggerMs = 0): Promise<void> {
@@ -380,9 +475,27 @@ async function scraperLoop(pool: any, region: { label: string; url: string }, st
     if (fresh.length > 0) {
       consecutiveInDb = 0;
       cooldownCount   = 0;
-      queue.push(...fresh);
-      stats.queued += fresh.length;
-      log(`[kj:${region.label}] page ${page}  ${payloads.length} scraped  →  ${fresh.length} new queued  (queue: ${queue.length})${cursorFound ? '  [cursor hit — stopping]' : ''}`);
+
+      // ── Advanced scrape for thin listings ────────────────
+      // Identify listings missing make/model/year/price in the search-results
+      // blob and fetch their detail pages to fill in the gaps.
+      // Done sequentially (each goes through the rate gate) to avoid burst.
+      const enriched: RawPayload[] = [];
+      let advancedCount = 0;
+      for (const p of fresh) {
+        if (isThinPayload(p)) {
+          const detailed = await fetchDetailPage(p, ua, region.label);
+          enriched.push(detailed);
+          advancedCount++;
+        } else {
+          enriched.push(p);
+        }
+      }
+
+      queue.push(...enriched);
+      stats.queued += enriched.length;
+      const advancedNote = advancedCount > 0 ? `  [${advancedCount} detail-fetched]` : '';
+      log(`[kj:${region.label}] page ${page}  ${payloads.length} scraped  →  ${enriched.length} new queued  (queue: ${queue.length})${cursorFound ? '  [cursor hit]' : ''}${advancedNote}`);
     } else {
       consecutiveInDb++;
       log(`[kj:${region.label}] page ${page}  ${payloads.length} scraped  →  all already in DB`);
@@ -555,8 +668,12 @@ async function normaliserWorker(id: number, pool: any, provider: string): Promis
       }
       const validated  = validateAndStandardise(extraction.fields);
 
-      // M2g — Vision colour detection (only if colour missing and images exist)
-      if (!noImages && !validated.colour_exterior) {
+      // M2g — Vision colour detection.
+      // Only runs on advanced-scraped payloads (detail page was fetched, so we
+      // have up to 10 images and confirmed the listing is worth enriching).
+      // Skipped for standard search-results payloads to avoid spending vision
+      // API calls on listings that may still be rejected downstream.
+      if (payload._advancedScrape && !noImages && !validated.colour_exterior) {
         const vision = await detectColour(payload.listing_images);
         if (vision.colour) {
           validated.colour_exterior = vision.colour;
