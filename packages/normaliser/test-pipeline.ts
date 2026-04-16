@@ -93,13 +93,16 @@ const KIJIJI_REGIONS = [
 const QUEUE_MAX      = 500;    // max pending payloads before scraper pauses
 const QUEUE_PAUSE_MS = 2000;   // how often to re-check queue size while paused
 
-// Each worker has its own dedicated provider so they never contend.
-// Worker 0 → Cerebras, Worker 1 → Groq 8b-instant, Worker 2 → Gemini Flash, Worker 3 → Together AI
+// 8 workers: 1× Cerebras, 1× Groq, 1× Gemini, 5× Together AI
+// Together AI is paid ($0.18/1M tokens) with no meaningful concurrent-request limit,
+// so running 5 instances of it is safe and cheap (~$0.33 total for all remaining Ontario).
+// To add a 2nd Groq key: set GROQ_API_KEY_2 in Railway env vars.
 const WORKER_PROVIDERS = [
   'cerebras',
   'groq',
   'gemini',
-  ...(process.env.TOGETHER_API_KEY ? ['together'] : []),  // enabled when key is set
+  ...(process.env.TOGETHER_API_KEY ? ['together', 'together', 'together', 'together', 'together'] : []),
+  ...(process.env.GROQ_API_KEY_2   ? ['groq2'] : []),
 ] as const;
 const PROGRESS_EVERY   = 10;    // print a stats line every N normalisations
 
@@ -139,10 +142,11 @@ const KIJIJI_RPM        = 25;  // max requests/min to Kijiji (~80% of safe ~30 R
 const KIJIJI_MIN_GAP_MS = Math.ceil(60_000 / KIJIJI_RPM); // = 2400ms between requests
 // Exhausted-region cooldown: exponential backoff so GTA regions (fully scraped)
 // park themselves progressively longer, freeing gate bandwidth for fresh Ontario regions.
-//   cooldownCount=0 → 1h, =1 → 2h, =2 → 4h, =3+ → 6h cap
-const INDB_COOLDOWN_BASE_MS = 60 * 60 * 1000;      // 1h base (was flat 20min)
-const INDB_COOLDOWN_MAX_MS  = 6 * 60 * 60 * 1000;  // 6h cap
-const INDB_THRESHOLD        = 2;  // consecutive all-in-DB pages before cooldown (was 4)
+//   cooldownCount=0 → 20min, =1 → 40min, =2+ → 60min cap
+// Threshold set high (5) so sporadic in-DB pages in active regions don't trigger sleep.
+const INDB_COOLDOWN_BASE_MS = 20 * 60 * 1000;      // 20min base
+const INDB_COOLDOWN_MAX_MS  = 60 * 60 * 1000;      // 1h cap — keeps all regions cycling
+const INDB_THRESHOLD        = 5;  // need 5 consecutive all-in-DB pages before cooldown
 let   _lastKijijiReq    = 0;
 const _kijijiQueue: Array<() => void> = [];
 let   _kijijiGateRunning = false;
@@ -457,6 +461,7 @@ async function fbScraperLoop(pool: any): Promise<void> {
 const PROVIDER_DELAY_MS: Record<string, number> = {
   cerebras:  2_000,   // ~30 RPM — at the free-tier cap; 8b model is fast enough
   groq:      2_000,   // ~30 RPM — 8b-instant has 14400 RPD, sustainable at full speed
+  groq2:     2_000,   // 2nd Groq account key (GROQ_API_KEY_2) — separate RPD pool
   gemini:    4_000,   // ~15 RPM — right at the free-tier hard limit
   together:    500,   // ~120 RPM — paid, no meaningful rate limit; run fast
   anthropic: 1_500,   // ~40 RPM — paid key

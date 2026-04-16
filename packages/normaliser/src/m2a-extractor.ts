@@ -63,6 +63,7 @@ let _openai:    OpenAI    | null = null;
 let _ollama:    OpenAI    | null = null;
 let _gemini:    OpenAI    | null = null;
 let _groq:      OpenAI    | null = null;
+let _groq2:     OpenAI    | null = null;  // 2nd Groq account (GROQ_API_KEY_2)
 let _cerebras:  OpenAI    | null = null;
 let _together:  OpenAI    | null = null;
 
@@ -92,6 +93,12 @@ function getGroq(): OpenAI {
   // Groq exposes an OpenAI-compatible API — free tier, ~500 tok/s.
   if (!_groq) _groq = new OpenAI({ apiKey: process.env.GROQ_API_KEY ?? '', baseURL: GROQ_BASE_URL, timeout: TIMEOUT_MS_CLOUD });
   return _groq;
+}
+
+function getGroq2(): OpenAI {
+  // Second Groq account key — separate 14,400 RPD pool. Set GROQ_API_KEY_2 in Railway env.
+  if (!_groq2) _groq2 = new OpenAI({ apiKey: process.env.GROQ_API_KEY_2 ?? '', baseURL: GROQ_BASE_URL, timeout: TIMEOUT_MS_CLOUD });
+  return _groq2;
 }
 
 function getCerebras(): OpenAI {
@@ -128,6 +135,7 @@ export async function extractFields(
   if (provider === 'openai')    return await callOpenAI(rawText);
   if (provider === 'gemini')    return await callGemini(rawText);
   if (provider === 'groq')      return await callGroq(rawText);
+  if (provider === 'groq2')     return await callGroq2(rawText);
   if (provider === 'cerebras')  return await callCerebras(rawText);
   if (provider === 'together')  return await callTogether(rawText);
 
@@ -390,6 +398,30 @@ async function callGroq(text: string): Promise<ExtractionResult> {
   const completionTokens = response.usage?.completion_tokens ?? 0;
 
   return { fields, model: `groq/${GROQ_MODEL}`, promptTokens, completionTokens, latencyMs, normalisationVersion: NORMALISATION_VERSION };
+}
+
+// ── Groq (2nd account key — separate 14,400 RPD pool) ────────────────────────
+
+async function callGroq2(text: string): Promise<ExtractionResult> {
+  const t0 = Date.now();
+
+  const response = await getGroq2().chat.completions.create({
+    model:       GROQ_MODEL,
+    max_tokens:  MAX_TOKENS,
+    temperature: 0,
+    messages: [
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user',   content: text },
+    ],
+  });
+
+  const latencyMs        = Date.now() - t0;
+  const rawJson          = response.choices[0]?.message?.content ?? '';
+  const fields           = parseJson(rawJson);
+  const promptTokens     = response.usage?.prompt_tokens     ?? 0;
+  const completionTokens = response.usage?.completion_tokens ?? 0;
+
+  return { fields, model: `groq2/${GROQ_MODEL}`, promptTokens, completionTokens, latencyMs, normalisationVersion: NORMALISATION_VERSION };
 }
 
 // ── Cerebras (cloud, free tier, ~2000 tok/s via Llama 3.3 70B) ───────────────
