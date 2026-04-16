@@ -13,7 +13,8 @@
     "db:migrate": "ts-node src/migrate.ts",
     "db:migrate:create": "ts-node src/migrate.ts --create",
     "db:status": "ts-node src/migrate.ts --status",
-    "db:rollback": "ts-node src/migrate.ts --rollback"
+    "db:rollback": "ts-node src/migrate.ts --rollback",
+    "review": "ts-node review-worker.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.26.0",

@@ -210,7 +210,7 @@ function printStatus(): void {
 function isThinPayload(p: RawPayload): boolean {
   const raw = JSON.parse(p.raw_content) as any;
   const missingCore = !raw.make || !raw.model || !raw.year;
-  const missingPrice = raw.priceCents == null && !raw.mileageKm;
+  const missingPrice = raw.priceCents == null || !raw.mileageKm;
   return missingCore || missingPrice;
 }
 

@@ -577,6 +577,8 @@ const SHARED_CSS = `
   .btn { display:inline-block; padding:3px 10px; border-radius:2px; font-size:10px; letter-spacing:1px; cursor:pointer; border:none; font-family:'DM Mono',monospace; }
   .btn-remove { background:#2b0d0d; color:#e74c3c; border:1px solid #4a1a1a; }
   .btn-remove:hover { background:#3b1010; }
+  .btn-approve { background:#0b2010; color:#27ae60; border:1px solid #1a4a2a; }
+  .btn-approve:hover { background:#0e2a16; }
   .btn-reanalyse { background:#0d1f2b; color:#2980b9; border:1px solid #1a3a4a; }
   .btn-reanalyse:hover { background:#112a3b; }
   /* Row animations */
@@ -1104,8 +1106,9 @@ const SHARED_JS = `
     const btns = row ? row.querySelectorAll('button') : [];
     btns.forEach(b => { b.disabled = true; });
 
-    const rerunBtn  = row ? row.querySelector('[data-action="reanalyse"]') : null;
-    const removeBtn = row ? row.querySelector('[data-action="remove"]') : null;
+    const rerunBtn   = row ? row.querySelector('[data-action="reanalyse"]') : null;
+    const removeBtn  = row ? row.querySelector('[data-action="remove"]') : null;
+    const approveBtn = row ? row.querySelector('[data-action="approve"]') : null;
 
     if (action === 'reanalyse') {
       if (rerunBtn) {
@@ -1113,6 +1116,9 @@ const SHARED_JS = `
         rerunBtn.textContent = 'RUNNING AI...';
       }
       if (row) row.querySelectorAll('td').forEach(td => { td.style.color = '#4a9eff'; td.style.background = '#08141f'; });
+    } else if (action === 'approve') {
+      if (approveBtn) approveBtn.textContent = '✓ APPROVING...';
+      if (row) row.querySelectorAll('td').forEach(td => { td.style.color = '#27ae60'; td.style.background = '#051a0a'; });
     } else {
       if (removeBtn) removeBtn.textContent = '✕ REMOVING...';
       if (row) row.querySelectorAll('td').forEach(td => { td.style.color = '#e74c3c'; td.style.background = '#1a0505'; });
@@ -1124,24 +1130,27 @@ const SHARED_JS = `
 
       if (j.ok) {
         if (row) {
-          // Success animation — green for reanalyse, red fade-out for remove
+          // Success animation — green for reanalyse/approve, red fade-out for remove
           if (action === 'reanalyse') {
             if (rerunBtn) { rerunBtn.classList.remove('btn-spinning'); rerunBtn.textContent = '✓ SENT TO AI'; }
             row.querySelectorAll('td').forEach(td => { td.style.color = '#27ae60'; td.style.background = ''; });
+            row.classList.add('row-success');
+          } else if (action === 'approve') {
             row.classList.add('row-success');
           } else {
             row.classList.add('row-deleting');
           }
           // Remove row from DOM after animation completes
-          setTimeout(() => { if (row.parentNode) row.remove(); }, action === 'reanalyse' ? 1200 : 700);
+          setTimeout(() => { if (row.parentNode) row.remove(); }, action === 'remove' ? 700 : 1200);
         }
       } else {
         // Error — restore buttons, show inline message
         if (row) {
           row.querySelectorAll('td').forEach(td => { td.style.color = ''; td.style.background = ''; });
           btns.forEach(b => { b.disabled = false; });
-          if (rerunBtn)  { rerunBtn.classList.remove('btn-spinning');  rerunBtn.textContent  = 'RE-RUN AI'; }
-          if (removeBtn) { removeBtn.textContent = 'REMOVE'; }
+          if (rerunBtn)   { rerunBtn.classList.remove('btn-spinning');  rerunBtn.textContent  = 'RE-RUN AI'; }
+          if (removeBtn)  { removeBtn.textContent  = 'REMOVE'; }
+          if (approveBtn) { approveBtn.textContent = 'APPROVE'; }
           // Show error inline — visible even if browser blocks alerts
           const lastTd = row.querySelector('td:last-child');
           if (lastTd) {
@@ -1158,8 +1167,9 @@ const SHARED_JS = `
       if (row) {
         row.querySelectorAll('td').forEach(td => { td.style.color = ''; td.style.background = ''; });
         btns.forEach(b => { b.disabled = false; });
-        if (rerunBtn)  { rerunBtn.classList.remove('btn-spinning');  rerunBtn.textContent  = 'RE-RUN AI'; }
-        if (removeBtn) { removeBtn.textContent = 'REMOVE'; }
+        if (rerunBtn)   { rerunBtn.classList.remove('btn-spinning');  rerunBtn.textContent  = 'RE-RUN AI'; }
+        if (removeBtn)  { removeBtn.textContent  = 'REMOVE'; }
+        if (approveBtn) { approveBtn.textContent = 'APPROVE'; }
         const lastTd = row.querySelector('td:last-child');
         if (lastTd) {
           const errSpan = document.createElement('div');
@@ -1369,8 +1379,9 @@ function buildDashboardHtml(s: Stats): string {
       <td style="color:#888;font-size:11px;">${r.reason}</td>
       <td style="color:#555;font-size:10px;">${r.created_at}</td>
       <td>
-        <button class="btn btn-reanalyse" data-qid="${r.queue_id}" data-action="reanalyse" onclick="reviewAction('${r.queue_id}','reanalyse')">RE-RUN AI</button>
-        <button class="btn btn-remove" data-qid="${r.queue_id}" data-action="remove" onclick="reviewAction('${r.queue_id}','remove')" style="margin-left:4px">REMOVE</button>
+        <button class="btn btn-approve"   data-qid="${r.queue_id}" data-action="approve"   onclick="reviewAction('${r.queue_id}','approve')" style="margin-left:4px">APPROVE</button>
+        <button class="btn btn-reanalyse" data-qid="${r.queue_id}" data-action="reanalyse" onclick="reviewAction('${r.queue_id}','reanalyse')" style="margin-left:4px">RE-RUN AI</button>
+        <button class="btn btn-remove"    data-qid="${r.queue_id}" data-action="remove"    onclick="reviewAction('${r.queue_id}','remove')" style="margin-left:4px">REMOVE</button>
       </td>
     </tr>`).join('');
 
@@ -2504,6 +2515,8 @@ function buildReviewHtml(rows: ReviewQueueRow[], total: number, page: number, so
     .btn { display:inline-block;padding:3px 10px;border-radius:2px;font-size:10px;letter-spacing:1px;cursor:pointer;border:none;font-family:'DM Mono',monospace; }
     .btn-remove { background:#2b0d0d;color:#e74c3c;border:1px solid #4a1a1a; }
     .btn-remove:hover { background:#3b1010; }
+    .btn-approve { background:#0b2010;color:#27ae60;border:1px solid #1a4a2a; }
+    .btn-approve:hover { background:#0e2a16; }
     .btn-reanalyse { background:#0d1f2b;color:#2980b9;border:1px solid #1a3a4a; }
     .btn-reanalyse:hover { background:#112a3b; }
     table { border-collapse:collapse;width:100%; }
@@ -2686,6 +2699,38 @@ app.post('/api/review/:queueId/reanalyse', async (req, res) => {
     res.json({ ok: true, message: 'Listing deleted — pipeline will re-process on next run' });
   } catch (err) {
     console.error('[review/reanalyse] error for queue=%s:', queueId, err);
+    if (client) await client.query('ROLLBACK').catch(() => {});
+    res.status(500).json({ ok: false, error: (err as Error).message });
+  } finally {
+    if (client) client.release();
+  }
+});
+
+// Review action: approve (publish the listing, mark queue item done)
+app.post('/api/review/:queueId/approve', async (req, res) => {
+  const { queueId } = req.params;
+  if (!isValidUuid(queueId)) return res.status(400).json({ ok: false, error: 'Invalid queue ID format' });
+  let client: import('pg').PoolClient | null = null;
+  try {
+    client = await pool.connect();
+    await client.query('BEGIN');
+    const { rows } = await client.query(
+      `SELECT listing_id FROM public.review_queue WHERE id = $1`, [queueId]
+    );
+    if (!rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: 'Queue item not found' }); }
+    const listingId = rows[0].listing_id;
+    await client.query(
+      `UPDATE public.listings SET status = 'active', needs_review = false, updated_at = NOW() WHERE id = $1`,
+      [listingId]
+    );
+    await client.query(
+      `UPDATE public.review_queue SET decision = 'approved', reviewed_at = NOW() WHERE id = $1`,
+      [queueId]
+    );
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[review/approve] error for queue=%s:', queueId, err);
     if (client) await client.query('ROLLBACK').catch(() => {});
     res.status(500).json({ ok: false, error: (err as Error).message });
   } finally {
