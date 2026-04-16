@@ -1523,21 +1523,23 @@ function buildDashboardHtml(s: Stats): string {
     </div>`}
   </div>
 
-  ${s.review_queue.length > 0 ? `
-  <div id="review" class="card amber" style="padding:18px;margin-bottom:20px;">
+  <div id="review" class="card ${s.review_queue.length > 0 ? 'amber' : 'gray'}" style="padding:18px;margin-bottom:20px;">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
-      <div class="section-title" style="color:#e67e22;margin-bottom:0;">Review queue — pending action</div>
-      <a href="/review" style="font-size:10px;color:#e67e22;letter-spacing:1px;border:1px solid #4a2a00;padding:3px 10px;border-radius:2px;background:#1a0e00;">VIEW FULL QUEUE →</a>
+      <div class="section-title" style="color:${s.review_queue.length > 0 ? '#e67e22' : '#555'};margin-bottom:0;">
+        Review queue
+        <span style="font-size:11px;font-weight:normal;margin-left:8px;color:#666;">${s.review_queue.length > 0 ? `${s.overview.needs_review} pending` : '— queue clear'}</span>
+      </div>
+      <a href="/review" style="font-size:10px;color:#e67e22;letter-spacing:1px;border:1px solid #4a2a00;padding:3px 10px;border-radius:2px;background:#1a0e00;text-decoration:none;">VIEW FULL QUEUE →</a>
     </div>
+
+    ${s.review_queue.length > 0 ? `
     <div style="font-size:11px;color:#666;margin-bottom:12px;">
-      Showing latest 25  ·  Hover any row for full data  ·  <strong style="color:#2980b9">RE-RUN AI</strong> re-processes through LLM from scratch  ·  <strong style="color:#e74c3c">REMOVE</strong> permanently rejects
+      Showing latest 25 of ${s.overview.needs_review}  ·  Hover any row for full data  ·  <strong style="color:#2980b9">RE-RUN AI</strong> re-processes through LLM from scratch  ·  <strong style="color:#e74c3c">REMOVE</strong> permanently rejects
     </div>
-    <!-- Re-run all pending -->
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
-      <button id="rerun-all-btn" class="btn btn-reanalyse" onclick="rerunAllPending()" style="padding:5px 14px;font-size:11px;">⟳ RE-RUN ALL PENDING</button>
+      <button id="rerun-all-btn" class="btn btn-reanalyse" onclick="rerunAllPending()" style="padding:5px 14px;font-size:11px;">⟳ RE-RUN ALL ${s.overview.needs_review} PENDING</button>
       <span id="rerun-all-progress" style="font-size:11px;color:#555;"></span>
     </div>
-    <!-- Bulk action bar (shown when ≥1 checkbox checked) -->
     <div id="bulk-bar" style="display:none;background:#0d1f2b;border:1px solid #1a3a4a;border-radius:3px;padding:10px 14px;margin-bottom:12px;align-items:center;gap:12px;">
       <span id="bulk-count" style="font-size:12px;color:#4a9eff;letter-spacing:1px;">0 SELECTED</span>
       <button id="bulk-rerun-btn" class="btn btn-reanalyse" onclick="bulkReanalyse()" style="padding:5px 14px;font-size:11px;">⟳ RE-RUN AI ON SELECTED</button>
@@ -1552,8 +1554,9 @@ function buildDashboardHtml(s: Stats): string {
         </tr></thead>
         <tbody>${reviewRows}</tbody>
       </table>
-    </div>
-  </div>` : ''}
+    </div>` : `
+    <div style="color:#555;font-size:12px;padding:16px 0;">All clear — no listings waiting for review.</div>`}
+  </div>
 
   <div class="footer-bar">
     <span>AVEN  ·  INTERNAL DASHBOARD</span>
