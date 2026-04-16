@@ -2496,7 +2496,8 @@ function buildReviewHtml(rows: ReviewQueueRow[], total: number, page: number, so
       <td style="padding:8px 6px;color:#555;font-size:10px;white-space:nowrap;">${r.city}${r.province ? ', ' + r.province : ''}</td>
       <td style="padding:8px 6px;color:#444;font-size:10px;white-space:nowrap;">${r.created_at}</td>
       <td style="padding:8px 6px;white-space:nowrap;">
-        <button class="btn btn-reanalyse" data-qid="${r.queue_id}" data-action="reanalyse" onclick="reviewAction('${r.queue_id}','reanalyse')">RE-RUN AI</button>
+        <button class="btn btn-approve"   data-qid="${r.queue_id}" data-action="approve"   onclick="reviewAction('${r.queue_id}','approve')">APPROVE</button>
+        <button class="btn btn-reanalyse" data-qid="${r.queue_id}" data-action="reanalyse" onclick="reviewAction('${r.queue_id}','reanalyse')" style="margin-left:4px">RE-RUN AI</button>
         <button class="btn btn-remove"    data-qid="${r.queue_id}" data-action="remove"    onclick="reviewAction('${r.queue_id}','remove')" style="margin-left:4px">REMOVE</button>
       </td>
     </tr>`;
