@@ -9,6 +9,7 @@
  *   Internal / admin:
  *     GET  /                                → Command Center dashboard (live stats, review queue)
  *     GET  /listings                        → All listings, paginated + filterable by source/status
+ *     GET  /review                          → Full review queue, paginated (50/page), filterable
  *     POST /api/review/:queueId/remove      → Reject a listing and close its review queue item
  *     POST /api/review/:queueId/reanalyse   → Delete listing so the pipeline re-processes it
  *     POST /api/review/bulk-reanalyse       → Bulk delete + re-queue (SSE stream, max 50 per batch)
@@ -1133,7 +1134,7 @@ const SHARED_JS = `
           }, 800);
         }
       } else {
-        // Reset on error
+        // Reset on error — show inline message so it's visible even if alerts are blocked
         if (row) {
           row.classList.remove('processing');
           row.querySelectorAll('td').forEach(td => { td.style.color = ''; td.style.background = ''; });
@@ -1142,16 +1143,33 @@ const SHARED_JS = `
           const db = row.querySelector('[data-action="remove"]');
           if (rb) rb.textContent = 'RE-RUN AI';
           if (db) db.textContent = 'REMOVE';
+          // Show error inline on the last TD
+          const lastTd = row.querySelector('td:last-child');
+          if (lastTd) {
+            const errSpan = document.createElement('div');
+            errSpan.style.cssText = 'color:#e74c3c;font-size:9px;margin-top:4px;letter-spacing:0;';
+            errSpan.textContent = 'ERR: ' + (j.error || 'unknown');
+            lastTd.appendChild(errSpan);
+            setTimeout(() => errSpan.remove(), 8000);
+          }
         }
-        alert('Error: ' + (j.error || 'unknown'));
+        console.error('Review action error:', j.error);
       }
     } catch(err) {
       if (row) {
         row.classList.remove('processing');
         row.querySelectorAll('td').forEach(td => { td.style.color = ''; td.style.background = ''; });
         btns.forEach(b => { b.disabled = false; });
+        const lastTd = row.querySelector('td:last-child');
+        if (lastTd) {
+          const errSpan = document.createElement('div');
+          errSpan.style.cssText = 'color:#e74c3c;font-size:9px;margin-top:4px;letter-spacing:0;';
+          errSpan.textContent = 'NETWORK ERROR — check Railway logs';
+          lastTd.appendChild(errSpan);
+          setTimeout(() => errSpan.remove(), 8000);
+        }
       }
-      alert('Network error — check console');
+      console.error('Review action network error:', err);
     }
   }
 
@@ -1459,9 +1477,12 @@ function buildDashboardHtml(s: Stats): string {
 
   ${s.review_queue.length > 0 ? `
   <div id="review" class="card amber" style="padding:18px;margin-bottom:20px;">
-    <div class="section-title" style="color:#e67e22">Review queue — pending action</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+      <div class="section-title" style="color:#e67e22;margin-bottom:0;">Review queue — pending action</div>
+      <a href="/review" style="font-size:10px;color:#e67e22;letter-spacing:1px;border:1px solid #4a2a00;padding:3px 10px;border-radius:2px;background:#1a0e00;">VIEW FULL QUEUE →</a>
+    </div>
     <div style="font-size:11px;color:#666;margin-bottom:12px;">
-      Hover any row for full data  ·  <strong style="color:#2980b9">RE-RUN AI</strong> re-processes through LLM from scratch  ·  <strong style="color:#e74c3c">REMOVE</strong> permanently rejects
+      Showing latest 25  ·  Hover any row for full data  ·  <strong style="color:#2980b9">RE-RUN AI</strong> re-processes through LLM from scratch  ·  <strong style="color:#e74c3c">REMOVE</strong> permanently rejects
     </div>
     <!-- Bulk action bar (shown when ≥1 checkbox checked) -->
     <div id="bulk-bar" style="display:none;background:#0d1f2b;border:1px solid #1a3a4a;border-radius:3px;padding:10px 14px;margin-bottom:12px;display:none;align-items:center;gap:12px;">
@@ -2298,6 +2319,214 @@ function buildHomeHtml(hs: HomepageStats): string {
 </body></html>`;
 }
 
+// ── Full Review Queue page ────────────────────────────────
+
+const REVIEW_PAGE_SIZE = 50;
+
+interface ReviewQueueRow {
+  queue_id: string;
+  listing_id: string;
+  make: string;
+  model: string;
+  year: number;
+  source_id: string;
+  confidence_score: number;
+  reason: string;
+  created_at: string;
+  source_url: string;
+  photo_urls: string[] | null;
+  vin: string | null;
+  price: number | null;
+  mileage_km: number | null;
+  city: string;
+  province: string | null;
+  rerun_count: number;
+}
+
+async function fetchReviewQueue(page: number, source: string): Promise<{ rows: ReviewQueueRow[]; total: number }> {
+  const offset = (page - 1) * REVIEW_PAGE_SIZE;
+  const conditions = [`rq.decision IS NULL`];
+  const params: unknown[] = [];
+
+  if (source) {
+    params.push(source);
+    conditions.push(`l.source_id = $${params.length}`);
+  }
+
+  const where = conditions.join(' AND ');
+
+  params.push(REVIEW_PAGE_SIZE, offset);
+  const limitIdx  = params.length - 1;
+  const offsetIdx = params.length;
+
+  const client = await pool.connect();
+  try {
+    const [dataRes, countRes] = await Promise.all([
+      client.query(`
+        SELECT rq.id AS queue_id, rq.listing_id,
+          l.make, l.model, l.year, l.source_id,
+          rq.confidence_score, rq.reason,
+          TO_CHAR(rq.created_at, 'HH24:MI  DD Mon') AS created_at,
+          l.source_url, l.photo_urls, l.vin,
+          l.price, l.mileage_km, l.city, l.province,
+          COALESCE(rq.rerun_count, 0) AS rerun_count
+        FROM public.review_queue rq
+        JOIN public.listings l ON l.id = rq.listing_id
+        WHERE ${where}
+        ORDER BY rq.created_at ASC
+        LIMIT $${limitIdx} OFFSET $${offsetIdx}
+      `, params),
+      client.query(`
+        SELECT COUNT(*) AS total
+        FROM public.review_queue rq
+        JOIN public.listings l ON l.id = rq.listing_id
+        WHERE ${where}
+      `, params.slice(0, params.length - 2)),
+    ]);
+    return { rows: dataRes.rows as ReviewQueueRow[], total: Number(countRes.rows[0].total) };
+  } finally {
+    client.release();
+  }
+}
+
+function buildReviewHtml(rows: ReviewQueueRow[], total: number, page: number, source: string): string {
+  const totalPages = Math.max(1, Math.ceil(total / REVIEW_PAGE_SIZE));
+  const from = total === 0 ? 0 : (page - 1) * REVIEW_PAGE_SIZE + 1;
+  const to   = Math.min(page * REVIEW_PAGE_SIZE, total);
+
+  const sources = ['', 'kijiji-ca', 'facebook-mp-ca'];
+
+  const sourceFilter = sources.map(s => {
+    const label = s === '' ? 'ALL' : s === 'kijiji-ca' ? 'KIJIJI' : 'FACEBOOK';
+    const active = s === source;
+    return `<a href="/review?source=${s}&page=1" style="padding:4px 10px;border-radius:2px;font-size:10px;letter-spacing:1px;background:${active ? '#c0392b' : '#1a1a1a'};color:${active ? '#fff' : '#888'};border:1px solid ${active ? '#c0392b' : '#333'};text-decoration:none;">${label}</a>`;
+  }).join('');
+
+  const rows_html = rows.map(r => {
+    const price   = r.price ? `$${Number(r.price).toLocaleString('en-CA')}` : '—';
+    const mileage = r.mileage_km ? `${Number(r.mileage_km).toLocaleString()} km` : '—';
+    const sc      = r.confidence_score;
+    const scColor = sc >= 70 ? '#27ae60' : sc >= 50 ? '#e67e22' : '#e74c3c';
+    const thumb   = r.photo_urls?.[0]
+      ? `<img style="width:64px;height:48px;object-fit:cover;border-radius:2px;background:#111;" src="${r.photo_urls[0]}" loading="lazy" onerror="this.style.display='none'">`
+      : `<div style="width:64px;height:48px;background:#111;border-radius:2px;"></div>`;
+    const srcColor = r.source_id === 'kijiji-ca' ? '#2980b9' : '#4a9eff';
+    const srcLabel = r.source_id === 'kijiji-ca' ? 'KJ' : 'FB';
+    const reruns   = r.rerun_count > 0 ? `<span style="color:#888;font-size:9px;margin-left:4px">(×${r.rerun_count})</span>` : '';
+    return `
+    <tr data-queue-row="${r.queue_id}" style="border-bottom:1px solid #1a1a1a;">
+      <td style="padding:8px 6px;width:72px;">${thumb}</td>
+      <td style="padding:8px 6px;">
+        <span style="background:${srcColor}22;color:${srcColor};border:1px solid ${srcColor}44;font-size:9px;padding:1px 5px;border-radius:2px;margin-right:6px;">${srcLabel}</span>
+        <a href="${r.source_url}" target="_blank" style="color:#e8e0d0;font-size:12px;">${r.year} ${r.make} ${r.model}</a>
+        ${reruns}
+      </td>
+      <td style="padding:8px 6px;color:#e67e22;font-size:12px;white-space:nowrap;"><span style="color:${scColor}">${sc}</span></td>
+      <td style="padding:8px 6px;color:#888;font-size:11px;max-width:260px;">${r.reason ?? '—'}</td>
+      <td style="padding:8px 6px;color:#aaa;font-size:11px;white-space:nowrap;">${price}</td>
+      <td style="padding:8px 6px;color:#666;font-size:11px;white-space:nowrap;">${mileage}</td>
+      <td style="padding:8px 6px;color:#555;font-size:10px;white-space:nowrap;">${r.city}${r.province ? ', ' + r.province : ''}</td>
+      <td style="padding:8px 6px;color:#444;font-size:10px;white-space:nowrap;">${r.created_at}</td>
+      <td style="padding:8px 6px;white-space:nowrap;">
+        <button class="btn btn-reanalyse" data-qid="${r.queue_id}" data-action="reanalyse" onclick="reviewAction('${r.queue_id}','reanalyse')">RE-RUN AI</button>
+        <button class="btn btn-remove"    data-qid="${r.queue_id}" data-action="remove"    onclick="reviewAction('${r.queue_id}','remove')" style="margin-left:4px">REMOVE</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  const prevHref = page > 1          ? `/review?source=${source}&page=${page - 1}` : '#';
+  const nextHref = page < totalPages  ? `/review?source=${source}&page=${page + 1}` : '#';
+  const prevStyle = page <= 1         ? 'opacity:.3;pointer-events:none;' : '';
+  const nextStyle = page >= totalPages ? 'opacity:.3;pointer-events:none;' : '';
+
+  return `<!DOCTYPE html>
+<html lang="en"><head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>Aven — Review Queue (${total})</title>
+  <style>${SHARED_CSS}
+    .btn { display:inline-block;padding:3px 10px;border-radius:2px;font-size:10px;letter-spacing:1px;cursor:pointer;border:none;font-family:'DM Mono',monospace; }
+    .btn-remove { background:#2b0d0d;color:#e74c3c;border:1px solid #4a1a1a; }
+    .btn-remove:hover { background:#3b1010; }
+    .btn-reanalyse { background:#0d1f2b;color:#2980b9;border:1px solid #1a3a4a; }
+    .btn-reanalyse:hover { background:#112a3b; }
+    table { border-collapse:collapse;width:100%; }
+    th { font-size:10px;letter-spacing:1px;color:#555;padding:6px;text-align:left;border-bottom:1px solid #2a1a1a;white-space:nowrap; }
+    tr.processing td { color:#4a9eff !important;background:#08141f !important; }
+    .pager a { color:#888;font-size:11px;letter-spacing:1px;padding:4px 10px;border:1px solid #2a1a1a;border-radius:2px;text-decoration:none; }
+    .pager a:hover { border-color:#555; }
+  </style>
+</head><body>
+  <div class="topbar">
+    <div class="logo">AVEN<span>REVIEW QUEUE</span></div>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <a href="/" style="font-size:11px;color:#555;letter-spacing:1px;border:1px solid #2a1a1a;padding:4px 10px;border-radius:2px;">← DASHBOARD</a>
+      <span style="font-size:11px;color:#555;letter-spacing:1px;">${total} PENDING</span>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:20px;flex-wrap:wrap;">
+    <span style="font-size:10px;color:#555;letter-spacing:1px;">SOURCE</span>
+    ${sourceFilter}
+    <span style="font-size:10px;color:#555;margin-left:12px;">SHOWING ${from}–${to} OF ${total}</span>
+  </div>
+
+  <!-- Bulk controls -->
+  <div id="bulk-bar" style="display:none;background:#0d1f2b;border:1px solid #1a3a4a;border-radius:3px;padding:10px 14px;margin-bottom:12px;align-items:center;gap:12px;">
+    <span id="bulk-count" style="font-size:12px;color:#4a9eff;letter-spacing:1px;">0 SELECTED</span>
+    <button id="bulk-rerun-btn" class="btn btn-reanalyse" onclick="bulkReanalyse()" style="padding:5px 14px;font-size:11px;">⟳ RE-RUN AI ON SELECTED</button>
+    <button class="btn" onclick="clearSelection()" style="background:#1a1a1a;color:#888;border:1px solid #333;padding:5px 10px;font-size:11px;">✕ DESELECT ALL</button>
+    <div id="bulk-progress" style="flex:1;font-size:11px;color:#888;"></div>
+  </div>
+
+  <!-- Table -->
+  <table>
+    <thead>
+      <tr>
+        <th><input type="checkbox" id="select-all" onchange="selectAll(this)"></th>
+        <th>LISTING</th>
+        <th>SCORE</th>
+        <th>REASON</th>
+        <th>PRICE</th>
+        <th>MILEAGE</th>
+        <th>LOCATION</th>
+        <th>QUEUED</th>
+        <th>ACTIONS</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rows_html || '<tr><td colspan="9" style="padding:40px;text-align:center;color:#555;font-size:12px;letter-spacing:1px;">NO PENDING ITEMS</td></tr>'}
+    </tbody>
+  </table>
+
+  <!-- Pagination -->
+  <div class="pager" style="display:flex;justify-content:space-between;align-items:center;margin-top:20px;padding-top:16px;border-top:1px solid #1a1a1a;">
+    <a href="${prevHref}" style="${prevStyle}">← PREV</a>
+    <span style="font-size:10px;color:#555;letter-spacing:1px;">PAGE ${page} / ${totalPages}</span>
+    <a href="${nextHref}" style="${nextStyle}">NEXT →</a>
+  </div>
+
+  <script>
+    ${SHARED_JS}
+
+    // Select-all checkbox
+    function selectAll(cb) {
+      document.querySelectorAll('.rq-cb').forEach(c => { c.checked = cb.checked; });
+      updateBulkBar();
+    }
+
+    // Add select-all column to rows (checkbox in first TD)
+    document.querySelectorAll('tbody tr[data-queue-row]').forEach(row => {
+      const qid = row.getAttribute('data-queue-row');
+      const firstTd = row.querySelector('td');
+      if (firstTd) {
+        firstTd.innerHTML = '<input type="checkbox" class="rq-cb" value="' + qid + '" onchange="updateBulkBar()">';
+      }
+    });
+  </script>
+</body></html>`;
+}
+
 // ── Express routes ────────────────────────────────────────
 
 // Dashboard
@@ -2336,12 +2565,26 @@ app.get('/listings', async (req, res) => {
   }
 });
 
+// Full review queue page
+app.get('/review', async (req, res) => {
+  try {
+    const page   = Math.max(1, parseInt(String(req.query.page   ?? '1'), 10));
+    const source = String(req.query.source ?? '');
+    const { rows, total } = await fetchReviewQueue(page, source);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(buildReviewHtml(rows, total, page, source));
+  } catch (err) {
+    res.status(500).send(`<pre style="background:#0d0d0d;color:#e74c3c;padding:24px;font-family:monospace;">Error: ${(err as Error).message}</pre>`);
+  }
+});
+
 // Review action: remove (reject the listing, close the queue item)
 app.post('/api/review/:queueId/remove', async (req, res) => {
   const { queueId } = req.params;
   if (!isValidUuid(queueId)) return res.status(400).json({ ok: false, error: 'Invalid queue ID format' });
-  const client = await pool.connect();
+  let client: import('pg').PoolClient | null = null;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
     // Grab listing_id first, then do both updates in one transaction
     const { rows } = await client.query(
@@ -2360,10 +2603,11 @@ app.post('/api/review/:queueId/remove', async (req, res) => {
     await client.query('COMMIT');
     res.json({ ok: true });
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    console.error('[review/remove] error for queue=%s:', queueId, err);
+    if (client) await client.query('ROLLBACK').catch(() => {});
     res.status(500).json({ ok: false, error: (err as Error).message });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
@@ -2371,8 +2615,9 @@ app.post('/api/review/:queueId/remove', async (req, res) => {
 app.post('/api/review/:queueId/reanalyse', async (req, res) => {
   const { queueId } = req.params;
   if (!isValidUuid(queueId)) return res.status(400).json({ ok: false, error: 'Invalid queue ID format' });
-  const client = await pool.connect();
+  let client: import('pg').PoolClient | null = null;
   try {
+    client = await pool.connect();
     await client.query('BEGIN');
     const { rows } = await client.query(
       `SELECT listing_id FROM public.review_queue WHERE id = $1`, [queueId]
@@ -2380,16 +2625,22 @@ app.post('/api/review/:queueId/reanalyse', async (req, res) => {
     if (!rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: 'Queue item not found' }); }
     const listingId = rows[0].listing_id;
     // Clear FK dependents before deleting the listing
-    await client.query(`DELETE FROM public.extraction_log WHERE listing_id = $1`, [listingId]);
+    // extraction_log may not exist in all environments — tolerate gracefully
+    try {
+      await client.query(`DELETE FROM public.extraction_log WHERE listing_id = $1`, [listingId]);
+    } catch (elErr) {
+      console.warn('[review/reanalyse] extraction_log delete skipped:', (elErr as Error).message);
+    }
     await client.query(`DELETE FROM public.review_queue WHERE listing_id = $1`, [listingId]);
     await client.query(`DELETE FROM public.listings WHERE id = $1`, [listingId]);
     await client.query('COMMIT');
     res.json({ ok: true, message: 'Listing deleted — pipeline will re-process on next run' });
   } catch (err) {
-    await client.query('ROLLBACK').catch(() => {});
+    console.error('[review/reanalyse] error for queue=%s:', queueId, err);
+    if (client) await client.query('ROLLBACK').catch(() => {});
     res.status(500).json({ ok: false, error: (err as Error).message });
   } finally {
-    client.release();
+    if (client) client.release();
   }
 });
 
@@ -2416,15 +2667,20 @@ app.post('/api/review/bulk-reanalyse', async (req, res) => {
       send({ total: ids.length, done, queueId, ok: false, error: 'Invalid queue ID format' });
       continue;
     }
-    const client = await pool.connect();
+    let client: import('pg').PoolClient | null = null;
     try {
+      client = await pool.connect();
       await client.query('BEGIN');
       const { rows } = await client.query(
         `SELECT listing_id FROM public.review_queue WHERE id = $1`, [queueId]
       );
       if (rows[0]) {
         const listingId = rows[0].listing_id;
-        await client.query(`DELETE FROM public.extraction_log WHERE listing_id = $1`, [listingId]);
+        try {
+          await client.query(`DELETE FROM public.extraction_log WHERE listing_id = $1`, [listingId]);
+        } catch (elErr) {
+          console.warn('[bulk-reanalyse] extraction_log delete skipped:', (elErr as Error).message);
+        }
         await client.query(`DELETE FROM public.review_queue WHERE listing_id = $1`, [listingId]);
         await client.query(`DELETE FROM public.listings WHERE id = $1`, [listingId]);
         await client.query('COMMIT');
@@ -2434,11 +2690,12 @@ app.post('/api/review/bulk-reanalyse', async (req, res) => {
       done++;
       send({ total: ids.length, done, queueId, ok: true });
     } catch (err) {
-      await client.query('ROLLBACK').catch(() => {});
+      console.error('[bulk-reanalyse] error for queue=%s:', queueId, err);
+      if (client) await client.query('ROLLBACK').catch(() => {});
       done++;
       send({ total: ids.length, done, queueId, ok: false, error: (err as Error).message });
     } finally {
-      client.release();
+      if (client) client.release();
     }
   }
 
