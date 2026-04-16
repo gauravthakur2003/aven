@@ -579,6 +579,13 @@ const SHARED_CSS = `
   .btn-remove:hover { background:#3b1010; }
   .btn-reanalyse { background:#0d1f2b; color:#2980b9; border:1px solid #1a3a4a; }
   .btn-reanalyse:hover { background:#112a3b; }
+  /* Row animations */
+  @keyframes spin { to { transform:rotate(360deg); } }
+  @keyframes row-fade-green { 0%{background:#051a0a;opacity:1} 80%{background:#051a0a;opacity:1} 100%{opacity:0} }
+  @keyframes row-fade-red   { 0%{background:#1a0505;opacity:1} 80%{background:#1a0505;opacity:1} 100%{opacity:0} }
+  .row-success { animation: row-fade-green 1.2s ease-out forwards !important; }
+  .row-deleting { animation: row-fade-red   0.7s ease-out forwards !important; }
+  .btn-spinning::before { content:'⟳'; display:inline-block; animation:spin 0.8s linear infinite; margin-right:4px; }
   /* Tooltip */
   #tt { position:fixed; z-index:9999; background:#181818; border:1px solid #333; border-radius:4px; padding:14px; width:320px; pointer-events:none; display:none; font-size:11px; box-shadow:0 8px 32px #000; }
   #tt img { width:100%; height:140px; object-fit:cover; border-radius:3px; margin-bottom:10px; display:block; background:#111; }
@@ -1095,81 +1102,122 @@ const SHARED_JS = `
   async function reviewAction(queueId, action) {
     const row  = document.querySelector('tr[data-queue-row="' + queueId + '"]');
     const btns = row ? row.querySelectorAll('button') : [];
-
-    // Disable all buttons on this row
     btns.forEach(b => { b.disabled = true; });
 
+    const rerunBtn  = row ? row.querySelector('[data-action="reanalyse"]') : null;
+    const removeBtn = row ? row.querySelector('[data-action="remove"]') : null;
+
     if (action === 'reanalyse') {
-      // Show vivid processing state on the row
-      if (row) {
-        row.classList.add('processing');
-        row.querySelectorAll('td').forEach(td => {
-          td.style.color = '#4a9eff';
-          td.style.background = '#08141f';
-        });
-        const btn = row.querySelector('[data-action="reanalyse"]');
-        if (btn) btn.textContent = '⟳ SENDING TO AI...';
+      if (rerunBtn) {
+        rerunBtn.classList.add('btn-spinning');
+        rerunBtn.textContent = 'RUNNING AI...';
       }
+      if (row) row.querySelectorAll('td').forEach(td => { td.style.color = '#4a9eff'; td.style.background = '#08141f'; });
     } else {
-      const btn = row ? row.querySelector('[data-action="remove"]') : null;
-      if (btn) btn.textContent = '✕ REMOVING...';
+      if (removeBtn) removeBtn.textContent = '✕ REMOVING...';
       if (row) row.querySelectorAll('td').forEach(td => { td.style.color = '#e74c3c'; td.style.background = '#1a0505'; });
     }
 
     try {
       const r = await fetch('/api/review/' + queueId + '/' + action, { method: 'POST' });
       const j = await r.json();
+
       if (j.ok) {
         if (row) {
-          row.classList.remove('processing');
+          // Success animation — green for reanalyse, red fade-out for remove
           if (action === 'reanalyse') {
-            row.querySelectorAll('td').forEach(td => { td.style.color = '#27ae60'; td.style.background = '#051a0a'; });
-            const btn = row.querySelector('[data-action="reanalyse"]');
-            if (btn) btn.textContent = '✓ QUEUED';
+            if (rerunBtn) { rerunBtn.classList.remove('btn-spinning'); rerunBtn.textContent = '✓ SENT TO AI'; }
+            row.querySelectorAll('td').forEach(td => { td.style.color = '#27ae60'; td.style.background = ''; });
+            row.classList.add('row-success');
+          } else {
+            row.classList.add('row-deleting');
           }
-          setTimeout(() => {
-            row.style.transition = 'opacity 0.5s';
-            row.style.opacity = '0';
-            setTimeout(() => row.remove(), 500);
-          }, 800);
+          // Remove row from DOM after animation completes
+          setTimeout(() => { if (row.parentNode) row.remove(); }, action === 'reanalyse' ? 1200 : 700);
         }
       } else {
-        // Reset on error — show inline message so it's visible even if alerts are blocked
+        // Error — restore buttons, show inline message
         if (row) {
-          row.classList.remove('processing');
           row.querySelectorAll('td').forEach(td => { td.style.color = ''; td.style.background = ''; });
           btns.forEach(b => { b.disabled = false; });
-          const rb = row.querySelector('[data-action="reanalyse"]');
-          const db = row.querySelector('[data-action="remove"]');
-          if (rb) rb.textContent = 'RE-RUN AI';
-          if (db) db.textContent = 'REMOVE';
-          // Show error inline on the last TD
+          if (rerunBtn)  { rerunBtn.classList.remove('btn-spinning');  rerunBtn.textContent  = 'RE-RUN AI'; }
+          if (removeBtn) { removeBtn.textContent = 'REMOVE'; }
+          // Show error inline — visible even if browser blocks alerts
           const lastTd = row.querySelector('td:last-child');
           if (lastTd) {
             const errSpan = document.createElement('div');
-            errSpan.style.cssText = 'color:#e74c3c;font-size:9px;margin-top:4px;letter-spacing:0;';
+            errSpan.style.cssText = 'color:#e74c3c;font-size:9px;margin-top:4px;letter-spacing:0;word-break:break-all;';
             errSpan.textContent = 'ERR: ' + (j.error || 'unknown');
             lastTd.appendChild(errSpan);
-            setTimeout(() => errSpan.remove(), 8000);
+            setTimeout(() => errSpan.remove(), 10000);
           }
         }
         console.error('Review action error:', j.error);
       }
     } catch(err) {
       if (row) {
-        row.classList.remove('processing');
         row.querySelectorAll('td').forEach(td => { td.style.color = ''; td.style.background = ''; });
         btns.forEach(b => { b.disabled = false; });
+        if (rerunBtn)  { rerunBtn.classList.remove('btn-spinning');  rerunBtn.textContent  = 'RE-RUN AI'; }
+        if (removeBtn) { removeBtn.textContent = 'REMOVE'; }
         const lastTd = row.querySelector('td:last-child');
         if (lastTd) {
           const errSpan = document.createElement('div');
           errSpan.style.cssText = 'color:#e74c3c;font-size:9px;margin-top:4px;letter-spacing:0;';
           errSpan.textContent = 'NETWORK ERROR — check Railway logs';
           lastTd.appendChild(errSpan);
-          setTimeout(() => errSpan.remove(), 8000);
+          setTimeout(() => errSpan.remove(), 10000);
         }
       }
       console.error('Review action network error:', err);
+    }
+  }
+
+  // ── Re-run ALL pending ────────────────────────────────
+  async function rerunAllPending() {
+    const btn  = document.getElementById('rerun-all-btn');
+    const prog = document.getElementById('rerun-all-progress');
+    if (btn)  btn.disabled = true;
+    if (prog) prog.textContent = 'Fetching queue...';
+
+    try {
+      const resp = await fetch('/api/review/bulk-reanalyse-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!resp.ok || !resp.body) throw new Error('Server error ' + resp.status);
+
+      const reader  = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let   buf     = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const parts = buf.split('\\n\\n');
+        buf = parts.pop() ?? '';
+        for (const part of parts) {
+          if (!part.startsWith('data: ')) continue;
+          try {
+            const ev = JSON.parse(part.slice(6));
+            if (prog) {
+              if (ev.finished) {
+                prog.textContent = '✓ ' + ev.done + ' listings re-queued for AI — reloading...';
+                setTimeout(() => location.reload(), 2000);
+              } else {
+                prog.textContent = ev.done + ' / ' + ev.total + ' processed...';
+                // Fade out the row if it's visible
+                const row = document.querySelector('tr[data-queue-row="' + ev.queueId + '"]');
+                if (row) { row.classList.add('row-success'); setTimeout(() => { if (row.parentNode) row.remove(); }, 1200); }
+              }
+            }
+          } catch {}
+        }
+      }
+    } catch(err) {
+      if (prog) prog.textContent = 'Error: ' + err.message;
+      if (btn)  btn.disabled = false;
     }
   }
 
@@ -1484,8 +1532,13 @@ function buildDashboardHtml(s: Stats): string {
     <div style="font-size:11px;color:#666;margin-bottom:12px;">
       Showing latest 25  ·  Hover any row for full data  ·  <strong style="color:#2980b9">RE-RUN AI</strong> re-processes through LLM from scratch  ·  <strong style="color:#e74c3c">REMOVE</strong> permanently rejects
     </div>
+    <!-- Re-run all pending -->
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+      <button id="rerun-all-btn" class="btn btn-reanalyse" onclick="rerunAllPending()" style="padding:5px 14px;font-size:11px;">⟳ RE-RUN ALL PENDING</button>
+      <span id="rerun-all-progress" style="font-size:11px;color:#555;"></span>
+    </div>
     <!-- Bulk action bar (shown when ≥1 checkbox checked) -->
-    <div id="bulk-bar" style="display:none;background:#0d1f2b;border:1px solid #1a3a4a;border-radius:3px;padding:10px 14px;margin-bottom:12px;display:none;align-items:center;gap:12px;">
+    <div id="bulk-bar" style="display:none;background:#0d1f2b;border:1px solid #1a3a4a;border-radius:3px;padding:10px 14px;margin-bottom:12px;align-items:center;gap:12px;">
       <span id="bulk-count" style="font-size:12px;color:#4a9eff;letter-spacing:1px;">0 SELECTED</span>
       <button id="bulk-rerun-btn" class="btn btn-reanalyse" onclick="bulkReanalyse()" style="padding:5px 14px;font-size:11px;">⟳ RE-RUN AI ON SELECTED</button>
       <button class="btn" onclick="clearSelection()" style="background:#1a1a1a;color:#888;border:1px solid #333;padding:5px 10px;font-size:11px;">✕ DESELECT ALL</button>
@@ -2415,14 +2468,15 @@ function buildReviewHtml(rows: ReviewQueueRow[], total: number, page: number, so
     const reruns   = r.rerun_count > 0 ? `<span style="color:#888;font-size:9px;margin-left:4px">(×${r.rerun_count})</span>` : '';
     return `
     <tr data-queue-row="${r.queue_id}" style="border-bottom:1px solid #1a1a1a;">
+      <td style="padding:8px 4px;width:28px;"><input type="checkbox" class="rq-cb" value="${r.queue_id}" onchange="updateBulkBar()"></td>
       <td style="padding:8px 6px;width:72px;">${thumb}</td>
       <td style="padding:8px 6px;">
         <span style="background:${srcColor}22;color:${srcColor};border:1px solid ${srcColor}44;font-size:9px;padding:1px 5px;border-radius:2px;margin-right:6px;">${srcLabel}</span>
         <a href="${r.source_url}" target="_blank" style="color:#e8e0d0;font-size:12px;">${r.year} ${r.make} ${r.model}</a>
         ${reruns}
       </td>
-      <td style="padding:8px 6px;color:#e67e22;font-size:12px;white-space:nowrap;"><span style="color:${scColor}">${sc}</span></td>
-      <td style="padding:8px 6px;color:#888;font-size:11px;max-width:260px;">${r.reason ?? '—'}</td>
+      <td style="padding:8px 6px;white-space:nowrap;"><span style="color:${scColor}">${sc}</span></td>
+      <td style="padding:8px 6px;color:#888;font-size:11px;max-width:240px;">${r.reason ?? '—'}</td>
       <td style="padding:8px 6px;color:#aaa;font-size:11px;white-space:nowrap;">${price}</td>
       <td style="padding:8px 6px;color:#666;font-size:11px;white-space:nowrap;">${mileage}</td>
       <td style="padding:8px 6px;color:#555;font-size:10px;white-space:nowrap;">${r.city}${r.province ? ', ' + r.province : ''}</td>
@@ -2471,7 +2525,11 @@ function buildReviewHtml(rows: ReviewQueueRow[], total: number, page: number, so
     <span style="font-size:10px;color:#555;margin-left:12px;">SHOWING ${from}–${to} OF ${total}</span>
   </div>
 
-  <!-- Bulk controls -->
+  <!-- Re-run all + bulk controls -->
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
+    <button id="rerun-all-btn" class="btn btn-reanalyse" onclick="rerunAllPending()" style="padding:5px 14px;font-size:11px;">⟳ RE-RUN ALL PENDING</button>
+    <span id="rerun-all-progress" style="font-size:11px;color:#555;"></span>
+  </div>
   <div id="bulk-bar" style="display:none;background:#0d1f2b;border:1px solid #1a3a4a;border-radius:3px;padding:10px 14px;margin-bottom:12px;align-items:center;gap:12px;">
     <span id="bulk-count" style="font-size:12px;color:#4a9eff;letter-spacing:1px;">0 SELECTED</span>
     <button id="bulk-rerun-btn" class="btn btn-reanalyse" onclick="bulkReanalyse()" style="padding:5px 14px;font-size:11px;">⟳ RE-RUN AI ON SELECTED</button>
@@ -2483,7 +2541,8 @@ function buildReviewHtml(rows: ReviewQueueRow[], total: number, page: number, so
   <table>
     <thead>
       <tr>
-        <th><input type="checkbox" id="select-all" onchange="selectAll(this)"></th>
+        <th style="width:28px;"><input type="checkbox" id="select-all" onchange="document.querySelectorAll('.rq-cb').forEach(c=>{c.checked=this.checked});updateBulkBar()"></th>
+        <th style="width:72px;">PHOTO</th>
         <th>LISTING</th>
         <th>SCORE</th>
         <th>REASON</th>
@@ -2495,7 +2554,7 @@ function buildReviewHtml(rows: ReviewQueueRow[], total: number, page: number, so
       </tr>
     </thead>
     <tbody>
-      ${rows_html || '<tr><td colspan="9" style="padding:40px;text-align:center;color:#555;font-size:12px;letter-spacing:1px;">NO PENDING ITEMS</td></tr>'}
+      ${rows_html || '<tr><td colspan="10" style="padding:40px;text-align:center;color:#555;font-size:12px;letter-spacing:1px;">NO PENDING ITEMS</td></tr>'}
     </tbody>
   </table>
 
@@ -2508,21 +2567,6 @@ function buildReviewHtml(rows: ReviewQueueRow[], total: number, page: number, so
 
   <script>
     ${SHARED_JS}
-
-    // Select-all checkbox
-    function selectAll(cb) {
-      document.querySelectorAll('.rq-cb').forEach(c => { c.checked = cb.checked; });
-      updateBulkBar();
-    }
-
-    // Add select-all column to rows (checkbox in first TD)
-    document.querySelectorAll('tbody tr[data-queue-row]').forEach(row => {
-      const qid = row.getAttribute('data-queue-row');
-      const firstTd = row.querySelector('td');
-      if (firstTd) {
-        firstTd.innerHTML = '<input type="checkbox" class="rq-cb" value="' + qid + '" onchange="updateBulkBar()">';
-      }
-    });
   </script>
 </body></html>`;
 }
@@ -2592,14 +2636,16 @@ app.post('/api/review/:queueId/remove', async (req, res) => {
     );
     if (!rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: 'Queue item not found' }); }
     const listingId = rows[0].listing_id;
-    await client.query(
-      `UPDATE public.listings SET status = 'rejected', needs_review = false, updated_at = NOW() WHERE id = $1`,
-      [listingId]
-    );
-    await client.query(
-      `UPDATE public.review_queue SET decision = 'removed', reviewed_at = NOW() WHERE id = $1`,
-      [queueId]
-    );
+    // Archive full listing row to deleted_listings before removing (48h auto-purge)
+    await client.query(`
+      INSERT INTO public.deleted_listings (id, original_data)
+      SELECT id, row_to_json(listings.*)::jsonb FROM public.listings WHERE id = $1
+      ON CONFLICT DO NOTHING
+    `, [listingId]);
+    // Clear FK dependents
+    try { await client.query(`DELETE FROM public.extraction_log WHERE listing_id = $1`, [listingId]); } catch {}
+    await client.query(`DELETE FROM public.review_queue WHERE listing_id = $1`, [listingId]);
+    await client.query(`DELETE FROM public.listings WHERE id = $1`, [listingId]);
     await client.query('COMMIT');
     res.json({ ok: true });
   } catch (err) {
@@ -2700,6 +2746,65 @@ app.post('/api/review/bulk-reanalyse', async (req, res) => {
   }
 
   send({ total: ids.length, done, finished: true });
+  res.end();
+});
+
+// Re-run ALL pending items in review queue (SSE stream, no cap)
+app.post('/api/review/bulk-reanalyse-all', async (req, res) => {
+  // Fetch all undecided queue IDs
+  let allIds: string[];
+  try {
+    const { rows } = await pool.query(
+      `SELECT id FROM public.review_queue WHERE decision IS NULL ORDER BY created_at ASC`
+    );
+    allIds = rows.map((r: any) => r.id as string);
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: (err as Error).message });
+  }
+
+  if (allIds.length === 0) {
+    return res.json({ ok: true, message: 'Queue is empty' });
+  }
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  const send = (data: object) => res.write(`data: ${JSON.stringify(data)}\n\n`);
+  send({ total: allIds.length, done: 0 });
+
+  let done = 0;
+  for (const queueId of allIds) {
+    let client: import('pg').PoolClient | null = null;
+    try {
+      client = await pool.connect();
+      await client.query('BEGIN');
+      const { rows } = await client.query(
+        `SELECT listing_id FROM public.review_queue WHERE id = $1`, [queueId]
+      );
+      if (rows[0]) {
+        const listingId = rows[0].listing_id;
+        try { await client.query(`DELETE FROM public.extraction_log WHERE listing_id = $1`, [listingId]); } catch {}
+        await client.query(`DELETE FROM public.review_queue WHERE listing_id = $1`, [listingId]);
+        await client.query(`DELETE FROM public.listings WHERE id = $1`, [listingId]);
+        await client.query('COMMIT');
+      } else {
+        await client.query('ROLLBACK');
+      }
+      done++;
+      send({ total: allIds.length, done, queueId, ok: true });
+    } catch (err) {
+      console.error('[bulk-reanalyse-all] error for queue=%s:', queueId, err);
+      if (client) await client.query('ROLLBACK').catch(() => {});
+      done++;
+      send({ total: allIds.length, done, queueId, ok: false, error: (err as Error).message });
+    } finally {
+      if (client) client.release();
+    }
+  }
+
+  send({ total: allIds.length, done, finished: true });
   res.end();
 });
 
@@ -2847,6 +2952,16 @@ pool.query('SELECT 1')
       console.log(`  Set Alert       →  http://localhost:${PORT}/alerts`);
       console.log(`  Auto-refresh: every ${REFRESH_MS / 1000}s`);
       console.log(`━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`);
+
+      // Purge deleted_listings older than 48 hours, every hour.
+      // The table may not exist yet on first deploy — tolerate gracefully.
+      const purgeDeletedListings = () => {
+        pool.query(`DELETE FROM public.deleted_listings WHERE deleted_at < NOW() - INTERVAL '48 hours'`)
+          .then(r => { if (r.rowCount && r.rowCount > 0) console.log(`[purge] deleted_listings: ${r.rowCount} row(s) purged`); })
+          .catch(err => { /* table may not exist yet — silent until migrated */ });
+      };
+      purgeDeletedListings(); // run once on startup
+      setInterval(purgeDeletedListings, 60 * 60 * 1000); // then every hour
     });
   })
   .catch(err => { console.error('Postgres not reachable:', (err as Error).message); process.exit(1); });

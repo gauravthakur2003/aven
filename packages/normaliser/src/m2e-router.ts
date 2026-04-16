@@ -60,7 +60,15 @@ export async function routeAndWrite(
 
   // If PII validation failed, override routing to review regardless of score.
   const forcedReview = piiForceReview;
-  const outcome = forcedReview ? 'review' : scored.outcome;
+  let outcome = forcedReview ? 'review' : scored.outcome;
+
+  // Financing-only listings → always hold for review.
+  // A listing with only a monthly/biweekly payment and no purchase price cannot be
+  // compared or sorted by consumers — keep it in the review queue until a human
+  // confirms or derives the actual purchase price.
+  const isFinancingOnly = f.price == null && f.payment_amount != null;
+  if (isFinancingOnly && outcome !== 'rejected') outcome = 'review';
+
   const status  = outcomeToStatus(outcome, scored.needs_review);
 
   // Build NormalisedListing
@@ -187,7 +195,9 @@ export async function routeAndWrite(
     if ((outcome === 'review' || forcedReview) && listingId) {
       const reason = forcedReview
         ? 'PII_REDACTION_FAILED'
-        : `Low confidence score: ${scored.confidence_score}`;
+        : isFinancingOnly
+          ? `FINANCING_ONLY: $${f.payment_amount}/${f.payment_frequency ?? 'mo'} — no purchase price`
+          : `Low confidence score: ${scored.confidence_score}`;
       await client.query(`
         INSERT INTO review_queue (listing_id, confidence_score, reason)
         VALUES ($1, $2, $3)

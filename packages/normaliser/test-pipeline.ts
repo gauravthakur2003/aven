@@ -337,7 +337,6 @@ async function scraperLoop(pool: any, region: { label: string; url: string }, st
     const runFresh = payloads.filter(p => !seenUrls.has(p.listing_url));
     if (runFresh.length === 0) {
       page++;
-      // (rate controlled by global kijijiRequest gate)
       continue;
     }
 
@@ -346,36 +345,63 @@ async function scraperLoop(pool: any, region: { label: string; url: string }, st
       `SELECT source_url FROM listings WHERE source_url = ANY($1)`, [urls],
     );
     const inDb = new Set(rows.map((r: any) => r.source_url as string));
-    const fresh = runFresh.filter(p => !inDb.has(p.listing_url));
 
-    // Mark all as seen (even DB dupes) so we don't re-check them
+    // Mark all as seen (even DB dupes) so we don't re-check them this run
     for (const p of runFresh) seenUrls.add(p.listing_url);
 
+    // ── Cursor-based scan ─────────────────────────────────
+    // Kijiji returns listings newest-first. Walk in order: the moment we see
+    // N_CURSOR_HITS consecutive in-DB listings, we've found the cursor —
+    // everything from that point onward is already processed. Stop pagination.
+    // Tolerance of 2 consecutive hits (not 1) handles boosted/sponsored listings
+    // that appear out of chronological order within a page.
+    const N_CURSOR_HITS = 2;
+    const fresh: RawPayload[] = [];
+    let consecutiveInDbItems = 0;
+    let cursorFound = false;
+
+    for (const p of runFresh) {
+      if (inDb.has(p.listing_url)) {
+        consecutiveInDbItems++;
+        if (consecutiveInDbItems >= N_CURSOR_HITS) {
+          cursorFound = true;
+          break;
+        }
+        // Tolerate 1 isolated in-DB listing (could be a boosted/re-listed car)
+        // but don't add it to fresh
+      } else {
+        consecutiveInDbItems = 0;
+        fresh.push(p);
+      }
+    }
+
     stats.scraped += payloads.length;
+
     if (fresh.length > 0) {
-      consecutiveInDb = 0; // reset — found new listings
-      cooldownCount   = 0; // reset exponential backoff — region is alive again
+      consecutiveInDb = 0;
+      cooldownCount   = 0;
       queue.push(...fresh);
       stats.queued += fresh.length;
-      log(`[kj:${region.label}] page ${page}  ${payloads.length} scraped  →  ${fresh.length} new queued  (queue: ${queue.length})`);
+      log(`[kj:${region.label}] page ${page}  ${payloads.length} scraped  →  ${fresh.length} new queued  (queue: ${queue.length})${cursorFound ? '  [cursor hit — stopping]' : ''}`);
     } else {
       consecutiveInDb++;
       log(`[kj:${region.label}] page ${page}  ${payloads.length} scraped  →  all already in DB`);
+    }
+
+    if (cursorFound || consecutiveInDb >= INDB_THRESHOLD) {
+      // We've scanned past all new content for this region — enter cooldown.
       // Exponential backoff: each exhaustion cycle parks the region twice as long.
-      // This frees gate bandwidth for fresh Ontario regions (London, Ottawa, Windsor, etc.)
-      // while ensuring GTA still wakes up periodically to catch newly posted cars.
-      if (consecutiveInDb >= INDB_THRESHOLD) {
-        const cooldownMs = Math.min(
-          INDB_COOLDOWN_BASE_MS * Math.pow(2, cooldownCount),
-          INDB_COOLDOWN_MAX_MS,
-        );
-        log(`[kj:${region.label}] exhausted — cooldown #${cooldownCount + 1}: ${Math.round(cooldownMs / 60000)}min (next: ${Math.round(Math.min(cooldownMs * 2, INDB_COOLDOWN_MAX_MS) / 60000)}min if still empty)`);
-        cooldownCount++;
-        consecutiveInDb = 0;
-        page = 1;
-        await sleep(cooldownMs);
-        continue;
-      }
+      // This frees gate bandwidth for fresh Ontario regions.
+      const cooldownMs = Math.min(
+        INDB_COOLDOWN_BASE_MS * Math.pow(2, cooldownCount),
+        INDB_COOLDOWN_MAX_MS,
+      );
+      log(`[kj:${region.label}] exhausted (${cursorFound ? 'cursor' : 'threshold'}) — cooldown #${cooldownCount + 1}: ${Math.round(cooldownMs / 60000)}min`);
+      cooldownCount++;
+      consecutiveInDb = 0;
+      page = 1;
+      await sleep(cooldownMs);
+      continue;
     }
 
     page++;
@@ -496,6 +522,21 @@ async function normaliserWorker(id: number, pool: any, provider: string): Promis
     const raw   = JSON.parse(payload.raw_content) as any;
     const label = `${raw.year ?? '?'} ${raw.make ?? '?'} ${raw.model ?? '?'}`;
     const t0    = Date.now();
+
+    // ── Pre-LLM price filter ───────────────────────────────
+    // Reject before the LLM call if there is clearly no price anywhere.
+    // priceCents comes directly from Kijiji Apollo state — most reliable signal.
+    // Fall back to checking the description for any dollar amount (e.g. "$14,500 obo").
+    // Listings with only monthly/biweekly financing info still pass (priceCents may be 0).
+    const hasPriceCents = raw.priceCents != null && raw.priceCents > 0;
+    const hasPriceInDesc = /\$\s*[\d,]+|\b\d{4,}\s*(?:obo|firm|asking|neg)/i.test(raw.description ?? '');
+    const hasPaymentInDesc = /\$\s*\d+\s*\/\s*(?:mo|month|week|bi-?week|bw)/i.test(raw.description ?? '');
+    if (!hasPriceCents && !hasPriceInDesc && !hasPaymentInDesc) {
+      stats.rejected++;
+      if (stats.rejected % 25 === 0) log(`[${provider}] no-price filter: ${stats.rejected} total rejected (latest: "${label}")`);
+      printStatus();
+      continue;
+    }
 
     try {
       const noImages = payload.listing_images.length === 0;
