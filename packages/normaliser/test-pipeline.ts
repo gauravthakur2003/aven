@@ -2,12 +2,18 @@
  * Aven — End-to-End Scrape + Normalise Pipeline
  *
  * What this does:
- *   Runs Kijiji and Facebook Marketplace scrapers in parallel with a pool of LLM
- *   normaliser workers. Scraped listings flow through a shared in-memory queue:
+ *   All scraper workers focus on ONE Kijiji region at a time. When that region
+ *   is exhausted (Kijiji returns empty pages), ALL workers shift to the next
+ *   region together. Runs FB scraper in parallel with a pool of LLM normaliser
+ *   workers draining a shared in-memory queue:
  *
- *     scraperLoop()     → queue[] → normaliserWorker(0) → Postgres
- *     fbScraperLoop()   ↗           normaliserWorker(1) ↗
- *                                   normaliserWorker(2) ↗
+ *     scraperWorker(0..N)  → queue[] → normaliserWorker(0) → Postgres
+ *     fbScraperLoop()      ↗           normaliserWorker(1) ↗
+ *                                      normaliserWorker(2) ↗
+ *
+ *   Region order: Northern Ontario first (least scraped) → GTA last.
+ *   Within each region: pages 1 → MAX_PAGES until Kijiji returns empty.
+ *   Cursor-based stopping is DISABLED — we sweep every page of every region.
  *
  *   Each normaliser worker runs the full M2 pipeline:
  *     M2a (LLM extraction) → M2b (validation) → M2g (vision) → M2f (CARFAX)
@@ -21,14 +27,6 @@
  *   - DATABASE_URL set in .env
  *   - At least one LLM API key set (CEREBRAS_API_KEY, GROQ_API_KEY, GEMINI_API_KEY)
  *   - For Facebook: run `npx ts-node fb-auth-setup.ts` first to create fb-session.json
- *
- * Sections in this file:
- *   1. Config & shared state     — constants, queue, stats counter
- *   2. scraperLoop()             — Kijiji pagination scraper
- *   3. fbScraperLoop()           — Facebook Marketplace wrapper (restarts per variant)
- *   4. normaliserWorker()        — LLM pipeline + DB write, one instance per provider
- *   5. dedupLoop()               — periodic deduplication pass
- *   6. main()                    — wires everything together with Promise.all()
  */
 
 import * as dotenv from 'dotenv';
@@ -50,53 +48,52 @@ import { scrapeFacebook, FB_URL_VARIANTS } from './src/fb-scraper';
 import { runDeduplication }     from './src/deduplicator';
 import { RawPayload }            from './src/types';
 
-const RETRY_429_MIN_MS   = 90_000; // min wait after a 429 (90s) — bumped to match higher RPM
+const RETRY_429_MIN_MS   = 90_000; // min wait after a 429 (90s)
 const RETRY_429_JITTER   = 90_000; // + random 0–90s → total 90–180s
-// All 23 regions run in parallel, staggered 3s apart (gate controls actual Kijiji rate)
 
+// Regions ordered Northern → Southwest → Eastern → Central → GTA.
+// All workers focus on one at a time; when exhausted, ALL shift to the next.
 const KIJIJI_REGIONS = [
-  // ── GTA ──────────────────────────────────────────────────
-  { label: 'Toronto',      url: 'https://www.kijiji.ca/b-cars-trucks/city-of-toronto/c174l1700273' },
-  { label: 'Peel',         url: 'https://www.kijiji.ca/b-cars-trucks/mississauga-peel-region/c174l1700276' },
-  { label: 'York',         url: 'https://www.kijiji.ca/b-cars-trucks/markham-york-region/c174l1700274' },
-  { label: 'Durham',       url: 'https://www.kijiji.ca/b-cars-trucks/oshawa-durham-region/c174l1700275' },
-  { label: 'Hamilton',     url: 'https://www.kijiji.ca/b-cars-trucks/hamilton/c174l80014' },
-  { label: 'Halton',       url: 'https://www.kijiji.ca/b-cars-trucks/oakville-halton-region/c174l1700277' },
-  // ── Eastern Ontario ───────────────────────────────────────
-  { label: 'Ottawa',       url: 'https://www.kijiji.ca/b-cars-trucks/ottawa/c174l1700185' },
-  { label: 'Kingston',     url: 'https://www.kijiji.ca/b-cars-trucks/kingston-on/c174l1700183' },
-  { label: 'Belleville',   url: 'https://www.kijiji.ca/b-cars-trucks/belleville/c174l1700130' },
-  { label: 'Peterborough', url: 'https://www.kijiji.ca/b-cars-trucks/peterborough/c174l1700218' },
-  // ── Central Ontario ───────────────────────────────────────
-  { label: 'Barrie',       url: 'https://www.kijiji.ca/b-cars-trucks/barrie/c174l1700006' },
-  { label: 'Guelph',       url: 'https://www.kijiji.ca/b-cars-trucks/guelph/c174l1700242' },
-  { label: 'Kitchener',    url: 'https://www.kijiji.ca/b-cars-trucks/kitchener-waterloo/c174l1700212' },
-  { label: 'Cambridge',    url: 'https://www.kijiji.ca/b-cars-trucks/cambridge/c174l1700210' },
-  { label: 'Brantford',    url: 'https://www.kijiji.ca/b-cars-trucks/brantford/c174l1700206' },
-  { label: 'Niagara',      url: 'https://www.kijiji.ca/b-cars-trucks/st-catharines/c174l80016' },
-  // ── Southwest Ontario ─────────────────────────────────────
-  { label: 'London',       url: 'https://www.kijiji.ca/b-cars-trucks/london/c174l1700214' },
-  { label: 'Windsor',      url: 'https://www.kijiji.ca/b-cars-trucks/windsor-area-on/c174l1700220' },
-  { label: 'Sarnia',       url: 'https://www.kijiji.ca/b-cars-trucks/sarnia/c174l1700191' },
-  // ── Northern Ontario ──────────────────────────────────────
-  { label: 'Sudbury',      url: 'https://www.kijiji.ca/b-cars-trucks/sudbury/c174l1700245' },
-  { label: 'Thunder Bay',  url: 'https://www.kijiji.ca/b-cars-trucks/thunder-bay/c174l1700126' },
+  // ── Northern Ontario (barely scraped) ────────────────────
+  { label: 'Thunder Bay',     url: 'https://www.kijiji.ca/b-cars-trucks/thunder-bay/c174l1700126' },
   { label: 'Sault Ste Marie', url: 'https://www.kijiji.ca/b-cars-trucks/sault-ste-marie/c174l1700244' },
-  { label: 'North Bay',    url: 'https://www.kijiji.ca/b-cars-trucks/north-bay/c174l1700243' },
-];
+  { label: 'Sudbury',         url: 'https://www.kijiji.ca/b-cars-trucks/sudbury/c174l1700245' },
+  { label: 'North Bay',       url: 'https://www.kijiji.ca/b-cars-trucks/north-bay/c174l1700243' },
+  // ── Southwest Ontario ─────────────────────────────────────
+  { label: 'Sarnia',          url: 'https://www.kijiji.ca/b-cars-trucks/sarnia/c174l1700191' },
+  { label: 'Brantford',       url: 'https://www.kijiji.ca/b-cars-trucks/brantford/c174l1700206' },
+  { label: 'Niagara',         url: 'https://www.kijiji.ca/b-cars-trucks/st-catharines/c174l80016' },
+  { label: 'Windsor',         url: 'https://www.kijiji.ca/b-cars-trucks/windsor-area-on/c174l1700220' },
+  { label: 'London',          url: 'https://www.kijiji.ca/b-cars-trucks/london/c174l1700214' },
+  // ── Eastern Ontario ───────────────────────────────────────
+  { label: 'Belleville',      url: 'https://www.kijiji.ca/b-cars-trucks/belleville/c174l1700130' },
+  { label: 'Kingston',        url: 'https://www.kijiji.ca/b-cars-trucks/kingston-on/c174l1700183' },
+  { label: 'Peterborough',    url: 'https://www.kijiji.ca/b-cars-trucks/peterborough/c174l1700218' },
+  { label: 'Ottawa',          url: 'https://www.kijiji.ca/b-cars-trucks/ottawa/c174l1700185' },
+  // ── Central Ontario ───────────────────────────────────────
+  { label: 'Barrie',          url: 'https://www.kijiji.ca/b-cars-trucks/barrie/c174l1700006' },
+  { label: 'Cambridge',       url: 'https://www.kijiji.ca/b-cars-trucks/cambridge/c174l1700210' },
+  { label: 'Kitchener',       url: 'https://www.kijiji.ca/b-cars-trucks/kitchener-waterloo/c174l1700212' },
+  { label: 'Guelph',          url: 'https://www.kijiji.ca/b-cars-trucks/guelph/c174l1700242' },
+  // ── GTA / Hamilton (most scraped — saved for last) ────────
+  { label: 'Hamilton',        url: 'https://www.kijiji.ca/b-cars-trucks/hamilton/c174l80014' },
+  { label: 'Halton',          url: 'https://www.kijiji.ca/b-cars-trucks/oakville-halton-region/c174l1700277' },
+  { label: 'Durham',          url: 'https://www.kijiji.ca/b-cars-trucks/oshawa-durham-region/c174l1700275' },
+  { label: 'York',            url: 'https://www.kijiji.ca/b-cars-trucks/markham-york-region/c174l1700274' },
+  { label: 'Peel',            url: 'https://www.kijiji.ca/b-cars-trucks/mississauga-peel-region/c174l1700276' },
+  { label: 'Toronto',         url: 'https://www.kijiji.ca/b-cars-trucks/city-of-toronto/c174l1700273' },
+] as const;
+
+type Region = typeof KIJIJI_REGIONS[number];
 
 // ── Queue backpressure ────────────────────────────────────
-// The scraper is faster than the LLM workers, so we cap the in-memory queue.
-// When queue.length >= QUEUE_MAX the scraper loops on QUEUE_PAUSE_MS sleeps
-// until workers have drained it below the threshold. This prevents unbounded
-// memory growth during long overnight runs.
-const QUEUE_MAX      = 500;    // max pending payloads before scraper pauses
-const QUEUE_PAUSE_MS = 2000;   // how often to re-check queue size while paused
+const QUEUE_MAX      = 800;    // max pending payloads before scraper pauses
+const QUEUE_PAUSE_MS = 1_000;
 
-// 8 workers: 1× Cerebras, 1× Groq, 1× Gemini, 5× Together AI
-// Together AI is paid ($0.18/1M tokens) with no meaningful concurrent-request limit,
-// so running 5 instances of it is safe and cheap (~$0.33 total for all remaining Ontario).
-// To add a 2nd Groq key: set GROQ_API_KEY_2 in Railway env vars.
+const MAX_PAGES         = 100;   // Kijiji hard limit per region
+const EMPTY_PAGE_STOP   = 2;     // consecutive empty pages → region done
+
+// 8 workers: 1× Cerebras, 1× Groq, 1× Gemini, 5× Together AI (if key set)
 const WORKER_PROVIDERS = [
   'cerebras',
   'groq',
@@ -104,7 +101,11 @@ const WORKER_PROVIDERS = [
   ...(process.env.TOGETHER_API_KEY ? ['together', 'together', 'together', 'together', 'together'] : []),
   ...(process.env.GROQ_API_KEY_2   ? ['groq2'] : []),
 ] as const;
-const PROGRESS_EVERY   = 10;    // print a stats line every N normalisations
+const PROGRESS_EVERY   = 10;
+
+// Number of concurrent scraper workers. They all share claimPage() so only one
+// region is in-flight at a time; the Kijiji rate gate keeps total RPM capped.
+const SCRAPER_WORKERS = 8;
 
 // ── Shared state ──────────────────────────────────────────
 
@@ -124,6 +125,36 @@ const stats = {
   fastPathed: 0,
 };
 
+// ── Region / page state (shared, synchronous = thread-safe in Node.js) ────
+
+let regionIdx    = 0;
+let nextPage     = 1;
+let emptyStreak  = 0;
+let reportRegion = 0;
+const startTime  = Date.now();
+
+/** Atomically claim the next page. Returns null when all regions are done. */
+function claimPage(): { region: Region; page: number; rIdx: number } | null {
+  while (emptyStreak >= EMPTY_PAGE_STOP || nextPage > MAX_PAGES) {
+    regionIdx++;
+    nextPage     = 1;
+    emptyStreak  = 0;
+    reportRegion = regionIdx;
+    if (regionIdx >= KIJIJI_REGIONS.length) return null;
+    log(`\n━━━ [${regionIdx + 1}/${KIJIJI_REGIONS.length}] Moving all workers → ${KIJIJI_REGIONS[regionIdx].label} ━━━\n`);
+  }
+  const region = KIJIJI_REGIONS[regionIdx];
+  const page   = nextPage++;
+  return { region, page, rIdx: regionIdx };
+}
+
+/** Workers call this after fetching a page to update the empty streak. */
+function reportPage(rIdx: number, kijijiCount: number): void {
+  if (rIdx !== reportRegion) return;  // stale — region already advanced
+  if (kijijiCount === 0) emptyStreak++;
+  else emptyStreak = 0;
+}
+
 // ── Graceful shutdown ─────────────────────────────────────
 
 process.on('SIGINT', () => {
@@ -135,18 +166,11 @@ process.on('SIGINT', () => {
 });
 
 // ── Global Kijiji rate gate ───────────────────────────────
-// All 23 scrapers share a single token bucket so the total
-// request rate to Kijiji never exceeds KIJIJI_RPM regardless
-// of how many regions are active.
-const KIJIJI_RPM        = 25;  // max requests/min to Kijiji (~80% of safe ~30 RPM limit)
-const KIJIJI_MIN_GAP_MS = Math.ceil(60_000 / KIJIJI_RPM); // = 2400ms between requests
-// Exhausted-region cooldown: exponential backoff so GTA regions (fully scraped)
-// park themselves progressively longer, freeing gate bandwidth for fresh Ontario regions.
-//   cooldownCount=0 → 20min, =1 → 40min, =2+ → 60min cap
-// Threshold set high (5) so sporadic in-DB pages in active regions don't trigger sleep.
-const INDB_COOLDOWN_BASE_MS = 20 * 60 * 1000;      // 20min base
-const INDB_COOLDOWN_MAX_MS  = 60 * 60 * 1000;      // 1h cap — keeps all regions cycling
-const INDB_THRESHOLD        = 5;  // need 5 consecutive all-in-DB pages before cooldown
+// All scrapers share a single token bucket so total request rate to Kijiji
+// never exceeds KIJIJI_RPM regardless of how many workers are active.
+const KIJIJI_RPM        = 25;
+const KIJIJI_MIN_GAP_MS = Math.ceil(60_000 / KIJIJI_RPM); // = 2400ms
+
 let   _lastKijijiReq    = 0;
 const _kijijiQueue: Array<() => void> = [];
 let   _kijijiGateRunning = false;
@@ -182,18 +206,28 @@ function sleep(ms: number): Promise<void> {
 }
 
 function log(msg: string): void {
-  process.stdout.write(`\r${' '.repeat(100)}\r`);  // clear progress line
+  process.stdout.write(`\r${' '.repeat(120)}\r`);  // clear progress line
   console.log(`  ${msg}`);
 }
 
 function printStatus(): void {
-  const avg = stats.normalised > 0 ? Math.round(stats.totalMs / stats.normalised) : 0;
+  const elapsedH = ((Date.now() - startTime) / 3_600_000).toFixed(1);
+  const region   = KIJIJI_REGIONS[regionIdx]?.label ?? 'DONE';
+  const avg      = stats.normalised > 0 ? Math.round(stats.totalMs / stats.normalised) : 0;
+  const rate     = stats.normalised > 0 ? Math.round(stats.normalised / ((Date.now() - startTime) / 3_600_000)) : 0;
   process.stdout.write(
-    `\r  scraped:${stats.scraped}  queue:${queue.length}  normalised:${stats.normalised}` +
-    `  pub:${stats.published}  review:${stats.review}  rej:${stats.rejected}` +
-    `  fast:${stats.fastPathed}  avg:${avg}ms  `,
+    `\r  [${elapsedH}h] ${region} pg${nextPage - 1}  ` +
+    `scraped:${stats.scraped} queue:${queue.length} ` +
+    `norm:${stats.normalised}(${rate}/h) pub:${stats.published} rev:${stats.review} rej:${stats.rejected} avg:${avg}ms  `,
   );
 }
+
+const USER_AGENTS = [
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0',
+];
 
 // ── Advanced detail-page scraper ─────────────────────────
 // Called for "thin" listings that are missing make/model/year or price
@@ -226,7 +260,6 @@ async function fetchDetailPage(payload: RawPayload, ua: string, regionLabel: str
     if (!scriptMatch) return payload;
 
     const nextData = JSON.parse(scriptMatch[1]) as any;
-    // Detail page structure: pageProps.adDetails or pageProps.ad
     const ad = nextData?.props?.pageProps?.adDetails ?? nextData?.props?.pageProps?.ad;
     if (!ad) return payload;
 
@@ -246,7 +279,6 @@ async function fetchDetailPage(payload: RawPayload, ua: string, regionLabel: str
 
     const existing = JSON.parse(payload.raw_content) as any;
 
-    // Merge — only fill in fields that were missing in the search-results blob
     const merged = {
       ...existing,
       title:       existing.title       ?? ad.title,
@@ -271,7 +303,6 @@ async function fetchDetailPage(payload: RawPayload, ua: string, regionLabel: str
       _sellerType: existing._sellerType ?? attrs['forsaleby'],
     };
 
-    // Collect up to 10 images from the detail page (search results only has 5)
     const detailImages: string[] = (ad.imageUrls ?? ad.images?.map((i: any) => i.url) ?? []).slice(0, 10);
     const mergedImages = detailImages.length > payload.listing_images.length ? detailImages : payload.listing_images;
 
@@ -284,53 +315,54 @@ async function fetchDetailPage(payload: RawPayload, ua: string, regionLabel: str
       _advancedScrape: true,
     };
   } catch (err) {
-    // Non-fatal: return original payload, pipeline will handle thin data as usual
     log(`[kj:${regionLabel}] advanced scrape failed for ${payload.listing_url}: ${(err as Error).message.slice(0, 80)}`);
     return payload;
   }
 }
 
-// ── Scraper loop ──────────────────────────────────────────
+// ── Scraper worker ────────────────────────────────────────
+// All N workers share claimPage()/reportPage(), so they collectively sweep
+// one region at a time. No idle workers: when a region runs dry, everyone
+// jumps to the next region together.
 
-async function scraperLoop(pool: any, region: { label: string; url: string }, staggerMs = 0): Promise<void> {
-  if (staggerMs > 0) await sleep(staggerMs);
-  let page = 1;
-  let consecutiveInDb = 0; // tracks how many pages in a row were all-in-DB
-  let cooldownCount   = 0; // how many exhaustion cooldowns this region has hit this run
-                           // drives exponential backoff: 1h → 2h → 4h → 6h cap
+async function scraperWorker(workerId: number, pool: any): Promise<void> {
+  // Stagger startup by 200ms so workers don't all hit claimPage() simultaneously
+  if (workerId > 0) await sleep(workerId * 200);
 
   while (!stopping) {
-    // Backpressure — pause if queue is too large
-    while (queue.length >= QUEUE_MAX && !stopping) {
-      await sleep(QUEUE_PAUSE_MS);
-    }
+    // Backpressure
+    while (queue.length >= QUEUE_MAX && !stopping) await sleep(QUEUE_PAUSE_MS);
     if (stopping) break;
 
+    const job = claimPage();
+    if (!job) {
+      log(`[scraper-${workerId}] all regions done — worker exiting`);
+      break;
+    }
+
+    const { region, page, rIdx } = job;
     const url = page === 1 ? region.url : `${region.url}?page=${page}`;
-    let payloads: RawPayload[];
+    const ua  = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
 
-    const USER_AGENTS = [
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
-      'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15',
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0',
-    ];
-    const ua = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
-
-    // Wait for global rate gate before hitting Kijiji
     await kijijiRequest();
+
+    let payloads: RawPayload[] = [];
 
     try {
       const res = await axios.get(url, {
-        headers: { 'User-Agent': ua, 'Accept-Language': 'en-CA,en;q=0.9', 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
+        headers: {
+          'User-Agent': ua,
+          'Accept-Language': 'en-CA,en;q=0.9',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
         timeout: 20_000,
       });
 
       const scriptMatch = (res.data as string).match(/<script id="__NEXT_DATA__"[^>]*>(.*?)<\/script>/s);
-      if (!scriptMatch) { page++; continue; }
+      if (!scriptMatch) { reportPage(rIdx, 0); continue; }
 
       const apollo = (JSON.parse(scriptMatch[1]) as any)?.props?.pageProps?.__APOLLO_STATE__ as Record<string, unknown>;
-      if (!apollo)  { page++; continue; }
+      if (!apollo) { reportPage(rIdx, 0); continue; }
 
       const scrapeRunId = uuidv4();
       payloads = Object.entries(apollo)
@@ -341,7 +373,6 @@ async function scraperLoop(pool: any, region: { label: string; url: string }, st
             ? (l.url.startsWith('http') ? l.url : `https://www.kijiji.ca${l.url}`)
             : `https://www.kijiji.ca/v-cars/${l.id}`;
 
-          // Parse attributes.all into a flat key→value map (primary data source)
           const attrs: Record<string, string> = {};
           for (const a of (l.attributes?.all ?? [])) {
             if (a.canonicalValues?.[0] != null) attrs[a.canonicalName] = a.canonicalValues[0];
@@ -354,14 +385,12 @@ async function scraperLoop(pool: any, region: { label: string; url: string }, st
             minivan: 'Minivan', wagon: 'Wagon', van: 'Van',
           };
 
-          // Year: attributes > vehicleInformation > title regex
           const attrYear   = attrs['caryear'] ? parseInt(attrs['caryear'], 10) : undefined;
           const titleMatch = (l.title as string | undefined)?.match(/\b(19[5-9]\d|20[012]\d)\b/);
           const year = attrYear
             ?? l.vehicleInformation?.years?.[0]
             ?? (titleMatch ? parseInt(titleMatch[1], 10) : undefined);
 
-          // Make/model: skip Kijiji sentinels 'othrmake' / 'othrmdl' (means "not in our list")
           const make  = (attrs['carmake']  && attrs['carmake']  !== 'othrmake') ? attrs['carmake']  : (l.vehicleInformation?.make  ?? undefined);
           const model = (attrs['carmodel'] && attrs['carmodel'] !== 'othrmdl')  ? attrs['carmodel'] : (l.vehicleInformation?.model ?? undefined);
 
@@ -373,7 +402,7 @@ async function scraperLoop(pool: any, region: { label: string; url: string }, st
             source_category:   'classifieds',
             listing_url:       listingUrl,
             scrape_timestamp:  new Date().toISOString(),
-            connector_version: '1.2.0',
+            connector_version: '1.3.0',
             raw_content:       JSON.stringify({
               title:           l.title,
               description:     l.description,
@@ -401,7 +430,7 @@ async function scraperLoop(pool: any, region: { label: string; url: string }, st
             }),
             raw_content_type:  'json' as const,
             listing_images:    (l.imageUrls ?? []).slice(0, 5),
-            geo_region:        'ON-GTA',
+            geo_region:        'ON',
             scrape_run_id:     scrapeRunId,
             http_status:       200,
             proxy_used:        false,
@@ -415,130 +444,74 @@ async function scraperLoop(pool: any, region: { label: string; url: string }, st
       const waitMs = is429
         ? RETRY_429_MIN_MS + Math.floor(Math.random() * RETRY_429_JITTER)
         : 8_000 + Math.floor(Math.random() * 7_000);
-      log(`[kj:${region.label}] page ${page} failed (${msg})${is429 ? ` — rate limited, waiting ${Math.round(waitMs/1000)}s` : ' — retrying'}`);
-      page = 1;
-      await sleep(waitMs);
+      log(`[scraper-${workerId}] ${region.label} p${page} failed (${msg})${is429 ? ` — rate limited, waiting ${Math.round(waitMs/1000)}s` : ' — retrying'}`);
+      if (is429) await sleep(waitMs);
+      // Treat as non-empty so we don't falsely advance the region on a transient failure
+      reportPage(rIdx, 1);
       continue;
     }
 
+    reportPage(rIdx, payloads.length);
     if (payloads.length === 0) {
-      log(`[kj:${region.label}] page ${page} empty — wrapping to page 1`);
-      page = 1;
-      // (rate controlled by global kijijiRequest gate)
+      log(`[scraper] ${region.label} p${page} → empty (Kijiji end) streak=${emptyStreak}`);
       continue;
     }
 
-    // Dedup: filter URLs seen this run + check DB
+    stats.scraped += payloads.length;
+
+    // Dedup: skip listings seen this run or already in DB
     const runFresh = payloads.filter(p => !seenUrls.has(p.listing_url));
-    if (runFresh.length === 0) {
-      page++;
-      continue;
-    }
+    for (const p of payloads) seenUrls.add(p.listing_url);
+
+    if (runFresh.length === 0) { printStatus(); continue; }
 
     const urls = runFresh.map(p => p.listing_url);
     const { rows } = await pool.query(
       `SELECT source_url FROM listings WHERE source_url = ANY($1)`, [urls],
     );
     const inDb = new Set(rows.map((r: any) => r.source_url as string));
+    const fresh = runFresh.filter(p => !inDb.has(p.listing_url));
 
-    // Mark all as seen (even DB dupes) so we don't re-check them this run
-    for (const p of runFresh) seenUrls.add(p.listing_url);
-
-    // ── Cursor-based scan ─────────────────────────────────
-    // Kijiji returns listings newest-first. Walk in order: the moment we see
-    // N_CURSOR_HITS consecutive in-DB listings, we've found the cursor —
-    // everything from that point onward is already processed. Stop pagination.
-    // Tolerance of 2 consecutive hits (not 1) handles boosted/sponsored listings
-    // that appear out of chronological order within a page.
-    const N_CURSOR_HITS = 2;
-    const fresh: RawPayload[] = [];
-    let consecutiveInDbItems = 0;
-    let cursorFound = false;
-
-    for (const p of runFresh) {
-      if (inDb.has(p.listing_url)) {
-        consecutiveInDbItems++;
-        if (consecutiveInDbItems >= N_CURSOR_HITS) {
-          cursorFound = true;
-          break;
-        }
-        // Tolerate 1 isolated in-DB listing (could be a boosted/re-listed car)
-        // but don't add it to fresh
-      } else {
-        consecutiveInDbItems = 0;
-        fresh.push(p);
-      }
-    }
-
-    stats.scraped += payloads.length;
-
-    if (fresh.length > 0) {
-      consecutiveInDb = 0;
-      cooldownCount   = 0;
-
-      // ── Advanced scrape for thin listings ────────────────
-      // Identify listings missing make/model/year/price in the search-results
-      // blob and fetch their detail pages to fill in the gaps.
-      // Done sequentially (each goes through the rate gate) to avoid burst.
-      const enriched: RawPayload[] = [];
-      let advancedCount = 0;
-      for (const p of fresh) {
-        if (isThinPayload(p)) {
-          const detailed = await fetchDetailPage(p, ua, region.label);
-          enriched.push(detailed);
-          advancedCount++;
-        } else {
-          enriched.push(p);
-        }
-      }
-
-      queue.push(...enriched);
-      stats.queued += enriched.length;
-      const advancedNote = advancedCount > 0 ? `  [${advancedCount} detail-fetched]` : '';
-      log(`[kj:${region.label}] page ${page}  ${payloads.length} scraped  →  ${enriched.length} new queued  (queue: ${queue.length})${cursorFound ? '  [cursor hit]' : ''}${advancedNote}`);
-    } else {
-      consecutiveInDb++;
-      log(`[kj:${region.label}] page ${page}  ${payloads.length} scraped  →  all already in DB`);
-    }
-
-    if (cursorFound || consecutiveInDb >= INDB_THRESHOLD) {
-      // We've scanned past all new content for this region — enter cooldown.
-      // Exponential backoff: each exhaustion cycle parks the region twice as long.
-      // This frees gate bandwidth for fresh Ontario regions.
-      const cooldownMs = Math.min(
-        INDB_COOLDOWN_BASE_MS * Math.pow(2, cooldownCount),
-        INDB_COOLDOWN_MAX_MS,
-      );
-      log(`[kj:${region.label}] exhausted (${cursorFound ? 'cursor' : 'threshold'}) — cooldown #${cooldownCount + 1}: ${Math.round(cooldownMs / 60000)}min`);
-      cooldownCount++;
-      consecutiveInDb = 0;
-      page = 1;
-      await sleep(cooldownMs);
+    if (fresh.length === 0) {
+      log(`[scraper] ${region.label} p${page}  ${payloads.length} kj → all in DB`);
+      printStatus();
       continue;
     }
 
-    page++;
-    // (rate controlled by global kijijiRequest gate)
-  }
+    // ── Advanced scrape for thin listings ────────────────
+    // Identify listings missing make/model/year/price in the search-results
+    // blob and fetch their detail pages to fill in the gaps.
+    const enriched: RawPayload[] = [];
+    let advancedCount = 0;
+    for (const p of fresh) {
+      if (isThinPayload(p)) {
+        const detailed = await fetchDetailPage(p, ua, region.label);
+        enriched.push(detailed);
+        advancedCount++;
+      } else {
+        enriched.push(p);
+      }
+    }
 
-  log(`[kj:${region.label}] stopped`);
+    queue.push(...enriched);
+    stats.queued += enriched.length;
+    const advancedNote = advancedCount > 0 ? `  [${advancedCount} detail-fetched]` : '';
+    log(`[scraper] ${region.label} p${page}  ${payloads.length} kj → ${enriched.length} new  (queue:${queue.length})${advancedNote}`);
+    printStatus();
+  }
 }
 
 // ── Facebook Marketplace scraper loop ─────────────────────
-// Runs in parallel with scraperLoop(). Restarts automatically after each
+// Runs in parallel with scraperWorker(). Restarts automatically after each
 // session ends (FB limits scrolls per session), until stopping = true.
 
 async function fbScraperLoop(pool: any): Promise<void> {
-  // Cycle through all city×price-band variants, one per browser session.
-  // One session per variant prevents FB from detecting multi-page automation patterns.
   let variantIdx = 0;
 
   while (!stopping) {
-    // Pick the next variant to scan (round-robin)
     const currentVariant = FB_URL_VARIANTS[variantIdx % FB_URL_VARIANTS.length];
     variantIdx++;
 
-    // Refresh seenUrls from DB so already-processed FB listings aren't re-queued
     const { rows: fbRows } = await pool.query(
       `SELECT source_url FROM listings WHERE source_url LIKE '%facebook.com/marketplace/item/%'`,
     );
@@ -551,7 +524,6 @@ async function fbScraperLoop(pool: any): Promise<void> {
       for await (const payload of scrapeFacebook(seenUrls, log, () => stopping, currentVariant)) {
         if (stopping) break;
 
-        // Backpressure
         while (queue.length >= QUEUE_MAX && !stopping) {
           await sleep(QUEUE_PAUSE_MS);
         }
@@ -571,8 +543,6 @@ async function fbScraperLoop(pool: any): Promise<void> {
     }
 
     if (!stopping) {
-      // Short break between variants — enough for FB to not see rapid repeated requests
-      // Reduced from 20s/10s to 8s/4s — delays add up significantly across 40 variants
       const restartDelay = sessionYielded > 0 ? 5_000 : 2_000;
       log(`[fb] session done (${sessionYielded} listings). Next variant in ${restartDelay / 1000}s...`);
       await sleep(restartDelay);
@@ -584,32 +554,16 @@ async function fbScraperLoop(pool: any): Promise<void> {
 
 // ── Normaliser worker ─────────────────────────────────────
 
-// Proactive inter-request delay per provider (prevents burst-then-429 cycle).
-// Each worker sleeps this long between requests — much cheaper than hitting the
-// rate limit, waiting for a retry-after header, and re-queuing the payload.
-//
-// How the numbers are derived:
-//   Cerebras  free tier: 30 RPM cap  → 1 req/2s = 30 RPM theoretical max.
-//                        Pulled back to 3.5s (~17 RPM) because daily token limits
-//                        are the binding constraint, not per-minute rate.
-//   Groq      free tier: 30 RPM + 14400 RPD for 8b-instant.
-//                        3.5s keeps us at ~17 RPM, sustainable for overnight runs.
-//   Gemini    free tier: 15 RPM hard cap on Flash models.
-//                        5s = ~12 RPM — gives headroom for startup bursts.
-//   Anthropic paid key:  ~1000 RPM (varies by tier) — 1.5s is conservative.
 const PROVIDER_DELAY_MS: Record<string, number> = {
-  cerebras:  2_000,   // ~30 RPM — at the free-tier cap; 8b model is fast enough
-  groq:      2_000,   // ~30 RPM — 8b-instant has 14400 RPD, sustainable at full speed
-  groq2:     2_000,   // 2nd Groq account key (GROQ_API_KEY_2) — separate RPD pool
-  gemini:    4_000,   // ~15 RPM — right at the free-tier hard limit
-  together:    500,   // ~120 RPM — paid, no meaningful rate limit; run fast
-  anthropic: 1_500,   // ~40 RPM — paid key
+  cerebras:  2_000,
+  groq:      2_000,
+  groq2:     2_000,
+  gemini:    4_000,
+  together:    500,
+  anthropic: 1_500,
 };
 
 async function normaliserWorker(id: number, pool: any, provider: string): Promise<void> {
-  // Stagger worker startup to avoid all workers hitting rate limits simultaneously.
-  // Worker 0 starts immediately; workers 1, 2, ... each wait an extra 8 seconds.
-  // This spreads the initial burst across providers and avoids simultaneous 429s.
   if (id > 0) {
     await sleep(id * 8_000);
     log(`[${provider}] worker started (staggered +${id * 8}s)`);
@@ -625,7 +579,6 @@ async function normaliserWorker(id: number, pool: any, provider: string): Promis
       continue;
     }
 
-    // Proactive rate limiting: ensure minimum gap between requests
     const sinceLast = Date.now() - lastRequestTime;
     if (sinceLast < interRequestDelay) {
       await sleep(interRequestDelay - sinceLast);
@@ -637,10 +590,6 @@ async function normaliserWorker(id: number, pool: any, provider: string): Promis
     const t0    = Date.now();
 
     // ── Pre-LLM price filter ───────────────────────────────
-    // Reject before the LLM call if there is clearly no price anywhere.
-    // priceCents comes directly from Kijiji Apollo state — most reliable signal.
-    // Fall back to checking the description for any dollar amount (e.g. "$14,500 obo").
-    // Listings with only monthly/biweekly financing info still pass (priceCents may be 0).
     const hasPriceCents = raw.priceCents != null && raw.priceCents > 0;
     const hasPriceInDesc = /\$\s*[\d,]+|\b\d{4,}\s*(?:obo|firm|asking|neg)/i.test(raw.description ?? '');
     const hasPaymentInDesc = /\$\s*\d+\s*\/\s*(?:mo|month|week|bi-?week|bw)/i.test(raw.description ?? '');
@@ -659,7 +608,6 @@ async function normaliserWorker(id: number, pool: any, provider: string): Promis
       if (isFastPathEligible(payload)) {
         extraction = fastPathExtract(payload);
         stats.fastPathed++;
-        // log fast-path usage every 50 listings for visibility
         if (stats.normalised % 50 === 0) {
           log(`[fast-path] ${label} — structured extract (0ms, no LLM)`);
         }
@@ -668,11 +616,7 @@ async function normaliserWorker(id: number, pool: any, provider: string): Promis
       }
       const validated  = validateAndStandardise(extraction.fields);
 
-      // M2g — Vision colour detection.
-      // Only runs on advanced-scraped payloads (detail page was fetched, so we
-      // have up to 10 images and confirmed the listing is worth enriching).
-      // Skipped for standard search-results payloads to avoid spending vision
-      // API calls on listings that may still be rejected downstream.
+      // M2g — Vision colour detection (advanced-scraped payloads only)
       if (payload._advancedScrape && !noImages && !validated.colour_exterior) {
         const vision = await detectColour(payload.listing_images);
         if (vision.colour) {
@@ -681,7 +625,7 @@ async function normaliserWorker(id: number, pool: any, provider: string): Promis
         }
       }
 
-      // M2f — CARFAX enrichment (only if VIN known and key fields missing)
+      // M2f — CARFAX enrichment (VIN known & key fields missing)
       if (validated.vin && (validated.accidents == null || validated.owners == null)) {
         const carfax = await lookupCarfax(validated.vin);
         if (carfax) {
@@ -693,7 +637,6 @@ async function normaliserWorker(id: number, pool: any, provider: string): Promis
             validated.owners = carfax.owners;
             validated._validationWarnings.push(`owners from carfax: ${carfax.owners}`);
           }
-          // Flag lien/stolen regardless
           if (carfax.hasLien)   validated._validationWarnings.push('CARFAX: active lien registered');
           if (carfax.stolen)    validated._validationWarnings.push('CARFAX: reported stolen');
           if (carfax.hasRecalls) validated._validationWarnings.push('CARFAX: open safety recalls');
@@ -704,7 +647,7 @@ async function normaliserWorker(id: number, pool: any, provider: string): Promis
       const redaction  = redactPII(validated.description);
       validated.description = redaction.text;
 
-      // M2c — Confidence scoring (hard reject rules also applied here)
+      // M2c — Confidence scoring
       const scored = computeConfidence(validated, noImages);
       await routeAndWrite(pool, payload, scored, extraction, redaction, redaction.failed);
 
@@ -721,32 +664,22 @@ async function normaliserWorker(id: number, pool: any, provider: string): Promis
     } catch (err) {
       const msg = (err as Error).message ?? '';
 
-      // ── Rate-limit backoff ────────────────────────────────
-      // Some providers embed the exact retry delay in the error message.
-      // Parse both formats before falling back to a fixed 90s pause.
-      //   Groq/OpenAI format: "Please try again in 14m52.5s"  → groups: [min, sec]
-      //   Short format:       "Please try again in 3.5s"      → groups: [sec]
       const retryMatch = msg.match(/try again in (\d+)m([\d.]+)s/i)
                       ?? msg.match(/try again in ([\d.]+)s/i);
       const is429 = msg.includes('429');
 
       if (retryMatch) {
-        // retryMatch[2] present → "Xm Y.Zs" format; absent → "Y.Zs" only
         const waitMs = retryMatch[2] != null
           ? (parseInt(retryMatch[1], 10) * 60 + parseFloat(retryMatch[2])) * 1000
           : parseFloat(retryMatch[1]) * 1000;
-        // Return payload to the FRONT of the queue so it's next when we resume
         queue.unshift(payload);
         log(`[${provider}] rate-limited — waiting ${Math.ceil(waitMs / 1000)}s then retrying`);
-        await sleep(waitMs + 2_000);  // +2s buffer so the window has fully reset
+        await sleep(waitMs + 2_000);
       } else if (is429) {
-        // Provider returned 429 with no retry hint (e.g. Cerebras) — fixed 90s back-off.
-        // Why 90s: Cerebras resets its per-minute window every ~60s; 90s gives headroom.
         queue.unshift(payload);
         log(`[${provider}] rate-limited (no retry hint) — waiting 90s then retrying`);
         await sleep(90_000);
       } else {
-        // Non-rate-limit error (network failure, bad response, etc.) — log and move on
         stats.errors++;
         log(`[${provider}] error on "${label}" — ${msg.slice(0, 120)}`);
       }
@@ -791,13 +724,10 @@ async function showSummary(pool: any): Promise<void> {
 }
 
 // ── Dedup loop ─────────────────────────────────────────────
-// Runs the deduplication engine every DEDUP_INTERVAL_MS in the background.
-// Starts after an initial delay to let the first scrape batch arrive.
 
 const DEDUP_INTERVAL_MS = 30 * 60 * 1000; // every 30 minutes
 
 async function dedupLoop(pool: any): Promise<void> {
-  // Wait 5 minutes before first pass so the pipeline has data to work with
   await sleep(5 * 60 * 1000);
   while (!stopping) {
     try {
@@ -822,18 +752,24 @@ async function main(): Promise<void> {
   const pool = getPool();
   await pool.query('SELECT 1');
   console.log('✓ Postgres connected');
-  console.log(`✓ Workers: ${WORKER_PROVIDERS.map((p, i) => `${i}→${p}`).join('  ')}   Queue max: ${QUEUE_MAX}`);
-  console.log(`✓ Kijiji regions: ${KIJIJI_REGIONS.map(r => r.label).join(', ')}`);
-  console.log('\n  Scraper runs at full speed. Each worker uses its own LLM provider in parallel.');
-  console.log('  Press Ctrl+C to stop cleanly.\n');
+  console.log(`✓ Normaliser workers: ${WORKER_PROVIDERS.map((p, i) => `${i}→${p}`).join('  ')}   Queue max: ${QUEUE_MAX}`);
+  console.log(`✓ Scraper workers: ${SCRAPER_WORKERS}  (all focus on one region at a time)`);
+  console.log(`✓ Region order: ${KIJIJI_REGIONS.map(r => r.label).join(' → ')}`);
+  console.log(`✓ Rate: ${KIJIJI_RPM} RPM global gate, up to ${MAX_PAGES} pages/region, empty-stop after ${EMPTY_PAGE_STOP} empties`);
+  console.log('\n  Press Ctrl+C to stop cleanly.\n');
 
-  // Start both scrapers + one worker per provider, all concurrently
+  // Seed seenUrls from DB so we don't re-enqueue existing Kijiji listings
+  log('Loading existing Kijiji URLs from DB…');
+  const { rows: existingRows } = await pool.query(
+    `SELECT source_url FROM listings WHERE source_id = 'kijiji-ca'`,
+  );
+  for (const r of existingRows) seenUrls.add(r.source_url as string);
+  log(`Loaded ${seenUrls.size} existing Kijiji URLs — won't re-queue these`);
+
   const workers = WORKER_PROVIDERS.map((provider, i) =>
     normaliserWorker(i, getPool(), provider),
   );
 
-  // FB_ENABLED=true must be explicitly set to turn on Facebook scraping.
-  // Disabled by default — set FB_ENABLED=true in .env to re-enable.
   const fbEnabled = process.env.FB_ENABLED === 'true';
   const hasFbSession = fbEnabled && (
     require('fs').existsSync(require('path').join(__dirname, 'fb-session.json'))
@@ -847,8 +783,10 @@ async function main(): Promise<void> {
   }
   console.log('');
 
+  const scrapers = Array.from({ length: SCRAPER_WORKERS }, (_, i) => scraperWorker(i, pool));
+
   await Promise.all([
-    ...KIJIJI_REGIONS.map((region, i) => scraperLoop(pool, region, i * 3_000)),
+    ...scrapers,
     ...(hasFbSession ? [fbScraperLoop(pool)] : []),
     dedupLoop(pool),
     ...workers,
