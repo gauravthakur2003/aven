@@ -98,8 +98,8 @@ const WORKER_PROVIDERS = [
   'cerebras',
   'groq',
   'gemini',
-  // Together AI: 4× 8B-Lite (fast, cheap) + 1× 70B-Turbo (higher quality)
-  ...(process.env.TOGETHER_API_KEY ? ['together', 'together', 'together', 'together', 'together_big'] : []),
+  // Together AI: 5× Llama-3-8B-Instruct-Lite — serverless, fastest, cheapest
+  ...(process.env.TOGETHER_API_KEY ? ['together', 'together', 'together', 'together', 'together'] : []),
   ...(process.env.GROQ_API_KEY_2   ? ['groq2'] : []),
 ] as const;
 const PROGRESS_EVERY   = 10;
