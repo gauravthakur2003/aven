@@ -178,7 +178,7 @@ async function fetchStats(): Promise<Stats> {
           COUNT(*) FILTER (WHERE status = 'active')             AS active,
           COUNT(*) FILTER (WHERE status = 'review')             AS review,
           COUNT(*) FILTER (WHERE status = 'rejected')           AS rejected,
-          COUNT(*) FILTER (WHERE needs_review = true)           AS needs_review,
+          (SELECT COUNT(*) FROM review_queue WHERE decision IS NULL) AS needs_review,
           COALESCE(ROUND(AVG(confidence_score))::int, 0)        AS avg_confidence,
           COUNT(*) FILTER (WHERE price IS NOT NULL)             AS with_price,
           COUNT(*) FILTER (WHERE mileage_km IS NOT NULL)        AS with_mileage,
@@ -2654,11 +2654,16 @@ app.post('/api/review/:queueId/remove', async (req, res) => {
     if (!rows[0]) { await client.query('ROLLBACK'); return res.status(404).json({ ok: false, error: 'Queue item not found' }); }
     const listingId = rows[0].listing_id;
     // Archive full listing row to deleted_listings before removing (48h auto-purge)
-    await client.query(`
-      INSERT INTO public.deleted_listings (id, original_data)
-      SELECT id, row_to_json(listings.*)::jsonb FROM public.listings WHERE id = $1
-      ON CONFLICT DO NOTHING
-    `, [listingId]);
+    // Wrapped in try/catch — if table doesn't exist the delete still proceeds
+    try {
+      await client.query(`
+        INSERT INTO public.deleted_listings (id, original_data)
+        SELECT id, row_to_json(listings.*)::jsonb FROM public.listings WHERE id = $1
+        ON CONFLICT DO NOTHING
+      `, [listingId]);
+    } catch (archErr) {
+      console.warn('[review/remove] deleted_listings archive skipped:', (archErr as Error).message);
+    }
     // Clear FK dependents
     try { await client.query(`DELETE FROM public.extraction_log WHERE listing_id = $1`, [listingId]); } catch {}
     await client.query(`DELETE FROM public.review_queue WHERE listing_id = $1`, [listingId]);

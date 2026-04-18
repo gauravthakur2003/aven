@@ -98,7 +98,8 @@ const WORKER_PROVIDERS = [
   'cerebras',
   'groq',
   'gemini',
-  ...(process.env.TOGETHER_API_KEY ? ['together', 'together', 'together', 'together', 'together'] : []),
+  // Together AI: 4× 8B-Lite (fast, cheap) + 1× 70B-Turbo (higher quality)
+  ...(process.env.TOGETHER_API_KEY ? ['together', 'together', 'together', 'together', 'together_big'] : []),
   ...(process.env.GROQ_API_KEY_2   ? ['groq2'] : []),
 ] as const;
 const PROGRESS_EVERY   = 10;
@@ -555,12 +556,13 @@ async function fbScraperLoop(pool: any): Promise<void> {
 // ── Normaliser worker ─────────────────────────────────────
 
 const PROVIDER_DELAY_MS: Record<string, number> = {
-  cerebras:  2_000,
-  groq:      2_000,
-  groq2:     2_000,
-  gemini:    4_000,
-  together:    500,
-  anthropic: 1_500,
+  cerebras:     2_000,
+  groq:         2_000,
+  groq2:        2_000,
+  gemini:       4_000,
+  together:       500,  // Llama-3-8B-Lite — very fast serverless
+  together_big:   500,  // Llama-3.3-70B-Turbo — same API, higher quality
+  anthropic:    1_500,
 };
 
 async function normaliserWorker(id: number, pool: any, provider: string): Promise<void> {
