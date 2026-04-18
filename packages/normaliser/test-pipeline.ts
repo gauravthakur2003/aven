@@ -51,40 +51,104 @@ import { RawPayload }            from './src/types';
 const RETRY_429_MIN_MS   = 90_000; // min wait after a 429 (90s)
 const RETRY_429_JITTER   = 90_000; // + random 0–90s → total 90–180s
 
-// Regions ordered Northern → Southwest → Eastern → Central → GTA.
-// All workers focus on one at a time; when exhausted, ALL shift to the next.
-const KIJIJI_REGIONS = [
-  // ── Northern Ontario (barely scraped) ────────────────────
-  { label: 'Thunder Bay',     url: 'https://www.kijiji.ca/b-cars-trucks/thunder-bay/c174l1700126' },
-  { label: 'Sault Ste Marie', url: 'https://www.kijiji.ca/b-cars-trucks/sault-ste-marie/c174l1700244' },
-  { label: 'Sudbury',         url: 'https://www.kijiji.ca/b-cars-trucks/sudbury/c174l1700245' },
-  { label: 'North Bay',       url: 'https://www.kijiji.ca/b-cars-trucks/north-bay/c174l1700243' },
-  // ── Southwest Ontario ─────────────────────────────────────
-  { label: 'Sarnia',          url: 'https://www.kijiji.ca/b-cars-trucks/sarnia/c174l1700191' },
-  { label: 'Brantford',       url: 'https://www.kijiji.ca/b-cars-trucks/brantford/c174l1700206' },
-  { label: 'Niagara',         url: 'https://www.kijiji.ca/b-cars-trucks/st-catharines/c174l80016' },
-  { label: 'Windsor',         url: 'https://www.kijiji.ca/b-cars-trucks/windsor-area-on/c174l1700220' },
-  { label: 'London',          url: 'https://www.kijiji.ca/b-cars-trucks/london/c174l1700214' },
-  // ── Eastern Ontario ───────────────────────────────────────
-  { label: 'Belleville',      url: 'https://www.kijiji.ca/b-cars-trucks/belleville/c174l1700130' },
-  { label: 'Kingston',        url: 'https://www.kijiji.ca/b-cars-trucks/kingston-on/c174l1700183' },
-  { label: 'Peterborough',    url: 'https://www.kijiji.ca/b-cars-trucks/peterborough/c174l1700218' },
-  { label: 'Ottawa',          url: 'https://www.kijiji.ca/b-cars-trucks/ottawa/c174l1700185' },
-  // ── Central Ontario ───────────────────────────────────────
-  { label: 'Barrie',          url: 'https://www.kijiji.ca/b-cars-trucks/barrie/c174l1700006' },
-  { label: 'Cambridge',       url: 'https://www.kijiji.ca/b-cars-trucks/cambridge/c174l1700210' },
-  { label: 'Kitchener',       url: 'https://www.kijiji.ca/b-cars-trucks/kitchener-waterloo/c174l1700212' },
-  { label: 'Guelph',          url: 'https://www.kijiji.ca/b-cars-trucks/guelph/c174l1700242' },
-  // ── GTA / Hamilton (most scraped — saved for last) ────────
-  { label: 'Hamilton',        url: 'https://www.kijiji.ca/b-cars-trucks/hamilton/c174l80014' },
-  { label: 'Halton',          url: 'https://www.kijiji.ca/b-cars-trucks/oakville-halton-region/c174l1700277' },
-  { label: 'Durham',          url: 'https://www.kijiji.ca/b-cars-trucks/oshawa-durham-region/c174l1700275' },
-  { label: 'York',            url: 'https://www.kijiji.ca/b-cars-trucks/markham-york-region/c174l1700274' },
-  { label: 'Peel',            url: 'https://www.kijiji.ca/b-cars-trucks/mississauga-peel-region/c174l1700276' },
-  { label: 'Toronto',         url: 'https://www.kijiji.ca/b-cars-trucks/city-of-toronto/c174l1700273' },
-] as const;
+// ── Region definitions ────────────────────────────────────
+interface RegionEntry { label: string; url: string; province: string; }
 
-type Region = typeof KIJIJI_REGIONS[number];
+// Ontario regions: Northern first (least scraped) → GTA last.
+const ON_REGIONS: RegionEntry[] = [
+  // ── Northern Ontario (barely scraped) ────────────────────
+  { label: 'Thunder Bay',     province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/thunder-bay/c174l1700126' },
+  { label: 'Sault Ste Marie', province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/sault-ste-marie/c174l1700244' },
+  { label: 'Sudbury',         province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/sudbury/c174l1700245' },
+  { label: 'North Bay',       province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/north-bay/c174l1700243' },
+  // ── Southwest Ontario ─────────────────────────────────────
+  { label: 'Sarnia',          province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/sarnia/c174l1700191' },
+  { label: 'Brantford',       province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/brantford/c174l1700206' },
+  { label: 'Niagara',         province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/st-catharines/c174l80016' },
+  { label: 'Windsor',         province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/windsor-area-on/c174l1700220' },
+  { label: 'London',          province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/london/c174l1700214' },
+  // ── Eastern Ontario ───────────────────────────────────────
+  { label: 'Belleville',      province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/belleville/c174l1700130' },
+  { label: 'Kingston',        province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/kingston-on/c174l1700183' },
+  { label: 'Peterborough',    province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/peterborough/c174l1700218' },
+  { label: 'Ottawa',          province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/ottawa/c174l1700185' },
+  // ── Central Ontario ───────────────────────────────────────
+  { label: 'Barrie',          province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/barrie/c174l1700006' },
+  { label: 'Cambridge',       province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/cambridge/c174l1700210' },
+  { label: 'Kitchener',       province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/kitchener-waterloo/c174l1700212' },
+  { label: 'Guelph',          province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/guelph/c174l1700242' },
+  // ── GTA / Hamilton (most scraped — saved for last) ────────
+  { label: 'Hamilton',        province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/hamilton/c174l80014' },
+  { label: 'Halton',          province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/oakville-halton-region/c174l1700277' },
+  { label: 'Durham',          province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/oshawa-durham-region/c174l1700275' },
+  { label: 'York',            province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/markham-york-region/c174l1700274' },
+  { label: 'Peel',            province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/mississauga-peel-region/c174l1700276' },
+  { label: 'Toronto',         province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/city-of-toronto/c174l1700273' },
+];
+
+// BC regions: smaller markets first → GVA (most listings) last.
+const BC_REGIONS: RegionEntry[] = [
+  { label: 'Prince George',   province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/prince-george/c174l1700143' },
+  { label: 'Kamloops',        province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/kamloops/c174l1700227' },
+  { label: 'Kelowna',         province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/kelowna/c174l1700228' },
+  { label: 'Nanaimo',         province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/nanaimo/c174l1700263' },
+  { label: 'Victoria',        province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/victoria-bc/c174l1700173' },
+  { label: 'Fraser Valley',   province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/fraser-valley/c174l1700139' },
+  { label: 'Vancouver',       province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/vancouver/c174l1700287' },
+];
+
+// ── RegionCursor: atomic page counter for a set of regions ──
+//  continuous=false → returns null when all regions exhausted (forward sweep)
+//  continuous=true  → wraps around forever (ongoing sweep)
+class RegionCursor {
+  private regIdx      = 0;
+  private nextPage    = 1;
+  private emptyStreak = 0;
+  private reportIdx   = 0;
+
+  constructor(
+    readonly regions:    RegionEntry[],
+    readonly name:       string,
+    readonly continuous: boolean = false,
+  ) {}
+
+  get currentLabel(): string { return this.regions[this.regIdx % this.regions.length]?.label ?? 'DONE'; }
+  get currentPage():  number { return this.nextPage - 1; }
+  get isDone():       boolean { return !this.continuous && this.regIdx >= this.regions.length; }
+
+  claim(): { region: RegionEntry; page: number; rIdx: number } | null {
+    if (!this.continuous && this.regIdx >= this.regions.length) return null;
+    while (this.emptyStreak >= EMPTY_PAGE_STOP || this.nextPage > MAX_PAGES) {
+      if (this.continuous) {
+        this.regIdx = (this.regIdx + 1) % this.regions.length;
+        if (this.regIdx === 0) log(`\n━━━ [${this.name}] Full sweep — restarting ━━━\n`);
+      } else {
+        this.regIdx++;
+        if (this.regIdx >= this.regions.length) return null;
+      }
+      this.nextPage    = 1;
+      this.emptyStreak = 0;
+      this.reportIdx   = this.regIdx;
+      const r = this.regions[this.regIdx % this.regions.length];
+      log(`\n━━━ [${this.name} ${(this.regIdx % this.regions.length) + 1}/${this.regions.length}] → ${r.label} ━━━\n`);
+    }
+    const region = this.regions[this.regIdx % this.regions.length];
+    const page   = this.nextPage++;
+    return { region, page, rIdx: this.regIdx };
+  }
+
+  report(rIdx: number, count: number): void {
+    if (rIdx !== this.reportIdx) return;
+    if (count === 0) this.emptyStreak++;
+    else this.emptyStreak = 0;
+  }
+}
+
+// Phase 1: all 8 workers sweep Ontario forward
+const onCursorP1 = new RegionCursor(ON_REGIONS, 'ON', false);
+// Phase 2 cursors (created after phase 1 completes)
+let bcCursor:   RegionCursor;
+let onCursorP2: RegionCursor;
 
 // ── Queue backpressure ────────────────────────────────────
 const QUEUE_MAX      = 800;    // max pending payloads before scraper pauses
@@ -104,9 +168,11 @@ const WORKER_PROVIDERS = [
 ] as const;
 const PROGRESS_EVERY   = 10;
 
-// Number of concurrent scraper workers. They all share claimPage() so only one
-// region is in-flight at a time; the Kijiji rate gate keeps total RPM capped.
-const SCRAPER_WORKERS = 8;
+// 8 scraper workers total.
+// Phase 1: all 8 sweep Ontario forward.
+// Phase 2: 6 workers → BC forward sweep | 2 workers → Ontario continuous loop.
+const SCRAPER_WORKERS  = 8;
+const BC_WORKERS       = 6;  // workers 0-5 → BC in Phase 2
 
 // ── Shared state ──────────────────────────────────────────
 
@@ -126,43 +192,22 @@ const stats = {
   fastPathed: 0,
 };
 
-// ── Region / page state (shared, synchronous = thread-safe in Node.js) ────
+// ── Phase coordination ─────────────────────────────────────
+// Phase 1: all 8 workers sweep Ontario.
+// Phase 2: workers 0-5 sweep BC, workers 6-7 loop Ontario continuously.
+let currentPhase  = 1;
+let p1DoneCount   = 0;
+let phase2Resolve!: () => void;
+const phase2Signal = new Promise<void>(res => { phase2Resolve = res; });
 
-let regionIdx    = 0;
-let nextPage     = 1;
-let emptyStreak  = 0;
-let reportRegion = 0;
 const startTime  = Date.now();
-
-/** Atomically claim the next page. Returns null when all regions are done. */
-function claimPage(): { region: Region; page: number; rIdx: number } | null {
-  // Guard: all regions already exhausted (regionIdx advanced past end on a previous call)
-  if (regionIdx >= KIJIJI_REGIONS.length) return null;
-  while (emptyStreak >= EMPTY_PAGE_STOP || nextPage > MAX_PAGES) {
-    regionIdx++;
-    nextPage     = 1;
-    emptyStreak  = 0;
-    reportRegion = regionIdx;
-    if (regionIdx >= KIJIJI_REGIONS.length) return null;
-    log(`\n━━━ [${regionIdx + 1}/${KIJIJI_REGIONS.length}] Moving all workers → ${KIJIJI_REGIONS[regionIdx].label} ━━━\n`);
-  }
-  const region = KIJIJI_REGIONS[regionIdx];
-  const page   = nextPage++;
-  return { region, page, rIdx: regionIdx };
-}
-
-/** Workers call this after fetching a page to update the empty streak. */
-function reportPage(rIdx: number, kijijiCount: number): void {
-  if (rIdx !== reportRegion) return;  // stale — region already advanced
-  if (kijijiCount === 0) emptyStreak++;
-  else emptyStreak = 0;
-}
 
 // ── Graceful shutdown ─────────────────────────────────────
 
 process.on('SIGINT', () => {
   if (!stopping) {
     stopping = true;
+    phase2Resolve?.(); // unblock any workers waiting for phase transition
     process.stdout.write('\n');
     log('Ctrl+C — draining queue then stopping…');
   }
@@ -215,11 +260,13 @@ function log(msg: string): void {
 
 function printStatus(): void {
   const elapsedH = ((Date.now() - startTime) / 3_600_000).toFixed(1);
-  const region   = KIJIJI_REGIONS[regionIdx]?.label ?? 'DONE';
   const avg      = stats.normalised > 0 ? Math.round(stats.totalMs / stats.normalised) : 0;
   const rate     = stats.normalised > 0 ? Math.round(stats.normalised / ((Date.now() - startTime) / 3_600_000)) : 0;
+  const phaseStr = currentPhase === 1
+    ? `P1:ON ${onCursorP1.currentLabel} pg${onCursorP1.currentPage}`
+    : `P2 BC:${bcCursor?.currentLabel ?? '-'} ON:${onCursorP2?.currentLabel ?? '-'}`;
   process.stdout.write(
-    `\r  [${elapsedH}h] ${region} pg${nextPage - 1}  ` +
+    `\r  [${elapsedH}h] ${phaseStr}  ` +
     `scraped:${stats.scraped} queue:${queue.length} ` +
     `norm:${stats.normalised}(${rate}/h) pub:${stats.published} rev:${stats.review} rej:${stats.rejected} avg:${avg}ms  `,
   );
@@ -323,25 +370,18 @@ async function fetchDetailPage(payload: RawPayload, ua: string, regionLabel: str
   }
 }
 
-// ── Scraper worker ────────────────────────────────────────
-// All N workers share claimPage()/reportPage(), so they collectively sweep
-// one region at a time. No idle workers: when a region runs dry, everyone
-// jumps to the next region together.
+// ── Scraper inner loop ────────────────────────────────────
+// Sweeps pages from `cursor` until it's exhausted (or stopping).
+// Used for both Phase 1 (Ontario forward) and Phase 2 (BC / Ontario-loop).
 
-async function scraperWorker(workerId: number, pool: any): Promise<void> {
-  // Stagger startup by 200ms so workers don't all hit claimPage() simultaneously
-  if (workerId > 0) await sleep(workerId * 200);
-
+async function sweepWithCursor(workerId: number, pool: any, cursor: RegionCursor): Promise<void> {
   while (!stopping) {
     // Backpressure
     while (queue.length >= QUEUE_MAX && !stopping) await sleep(QUEUE_PAUSE_MS);
     if (stopping) break;
 
-    const job = claimPage();
-    if (!job) {
-      log(`[scraper-${workerId}] all regions done — worker exiting`);
-      break;
-    }
+    const job = cursor.claim();
+    if (!job) break; // region set exhausted (non-continuous cursors only)
 
     const { region, page, rIdx } = job;
     const url = page === 1 ? region.url : `${region.url}?page=${page}`;
@@ -362,10 +402,10 @@ async function scraperWorker(workerId: number, pool: any): Promise<void> {
       });
 
       const scriptMatch = (res.data as string).match(/<script id="__NEXT_DATA__"[^>]*>(.*?)<\/script>/s);
-      if (!scriptMatch) { reportPage(rIdx, 0); continue; }
+      if (!scriptMatch) { cursor.report(rIdx, 0); continue; }
 
       const apollo = (JSON.parse(scriptMatch[1]) as any)?.props?.pageProps?.__APOLLO_STATE__ as Record<string, unknown>;
-      if (!apollo) { reportPage(rIdx, 0); continue; }
+      if (!apollo) { cursor.report(rIdx, 0); continue; }
 
       const scrapeRunId = uuidv4();
       payloads = Object.entries(apollo)
@@ -433,7 +473,7 @@ async function scraperWorker(workerId: number, pool: any): Promise<void> {
             }),
             raw_content_type:  'json' as const,
             listing_images:    (l.imageUrls ?? []).slice(0, 5),
-            geo_region:        'ON',
+            geo_region:        region.province,   // 'ON' or 'BC' based on region set
             scrape_run_id:     scrapeRunId,
             http_status:       200,
             proxy_used:        false,
@@ -450,13 +490,13 @@ async function scraperWorker(workerId: number, pool: any): Promise<void> {
       log(`[scraper-${workerId}] ${region.label} p${page} failed (${msg})${is429 ? ` — rate limited, waiting ${Math.round(waitMs/1000)}s` : ' — retrying'}`);
       if (is429) await sleep(waitMs);
       // Treat as non-empty so we don't falsely advance the region on a transient failure
-      reportPage(rIdx, 1);
+      cursor.report(rIdx, 1);
       continue;
     }
 
-    reportPage(rIdx, payloads.length);
+    cursor.report(rIdx, payloads.length);
     if (payloads.length === 0) {
-      log(`[scraper] ${region.label} p${page} → empty (Kijiji end) streak=${emptyStreak}`);
+      log(`[scraper] ${region.label} p${page} → empty (Kijiji end)`);
       continue;
     }
 
@@ -482,8 +522,6 @@ async function scraperWorker(workerId: number, pool: any): Promise<void> {
     }
 
     // ── Advanced scrape for thin listings ────────────────
-    // Identify listings missing make/model/year/price in the search-results
-    // blob and fetch their detail pages to fill in the gaps.
     const enriched: RawPayload[] = [];
     let advancedCount = 0;
     for (const p of fresh) {
@@ -499,9 +537,47 @@ async function scraperWorker(workerId: number, pool: any): Promise<void> {
     queue.push(...enriched);
     stats.queued += enriched.length;
     const advancedNote = advancedCount > 0 ? `  [${advancedCount} detail-fetched]` : '';
-    log(`[scraper] ${region.label} p${page}  ${payloads.length} kj → ${enriched.length} new  (queue:${queue.length})${advancedNote}`);
+    log(`[scraper] ${region.province} ${region.label} p${page}  ${payloads.length} kj → ${enriched.length} new  (queue:${queue.length})${advancedNote}`);
     printStatus();
   }
+}
+
+// ── Scraper worker ────────────────────────────────────────
+// Phase 1: all 8 workers sweep Ontario forward.
+// Phase 2 (auto): workers 0-5 → BC forward sweep | workers 6-7 → Ontario continuous loop.
+
+async function scraperWorker(workerId: number, pool: any): Promise<void> {
+  // Stagger startup by 200ms so workers don't all hit claim() simultaneously
+  if (workerId > 0) await sleep(workerId * 200);
+
+  // ── Phase 1: Ontario forward sweep ───────────────────────
+  await sweepWithCursor(workerId, pool, onCursorP1);
+
+  if (stopping) return;
+
+  // Coordinate the phase transition: wait until ALL Phase-1 workers are done
+  p1DoneCount++;
+  if (p1DoneCount >= SCRAPER_WORKERS) {
+    log(`\n${'═'.repeat(60)}`);
+    log(`  ✓ Ontario sweep complete (${ON_REGIONS.length} regions)`);
+    log(`  Phase 2: workers 0-${BC_WORKERS - 1} → BC | workers ${BC_WORKERS}-${SCRAPER_WORKERS - 1} → Ontario continuous`);
+    log(`${'═'.repeat(60)}\n`);
+    bcCursor   = new RegionCursor(BC_REGIONS, 'BC', false);
+    onCursorP2 = new RegionCursor(ON_REGIONS, 'ON-loop', true);
+    currentPhase = 2;
+    phase2Resolve();
+  }
+  await phase2Signal; // wait until all workers have finished Phase 1
+
+  if (stopping) return;
+
+  // ── Phase 2: BC (workers 0-5) or Ontario continuous (workers 6-7) ────
+  const p2Cursor = workerId < BC_WORKERS ? bcCursor : onCursorP2;
+  const p2Role   = workerId < BC_WORKERS ? 'BC' : 'ON-loop';
+  log(`[scraper-${workerId}] entering Phase 2 as ${p2Role}`);
+  await sweepWithCursor(workerId, pool, p2Cursor);
+
+  log(`[scraper-${workerId}] Phase 2 done — exiting`);
 }
 
 // ── Facebook Marketplace scraper loop ─────────────────────
@@ -619,6 +695,11 @@ async function normaliserWorker(id: number, pool: any, provider: string): Promis
         extraction = await extractFields(payload, provider);
       }
       const validated  = validateAndStandardise(extraction.fields);
+
+      // Province override: if LLM couldn't determine province, use geo_region from scraper
+      if (!validated.province && payload.geo_region) {
+        validated.province = payload.geo_region; // 'ON' or 'BC'
+      }
 
       // M2g — Vision colour detection (advanced-scraped payloads only)
       if (payload._advancedScrape && !noImages && !validated.colour_exterior) {
@@ -757,8 +838,11 @@ async function main(): Promise<void> {
   await pool.query('SELECT 1');
   console.log('✓ Postgres connected');
   console.log(`✓ Normaliser workers: ${WORKER_PROVIDERS.map((p, i) => `${i}→${p}`).join('  ')}   Queue max: ${QUEUE_MAX}`);
-  console.log(`✓ Scraper workers: ${SCRAPER_WORKERS}  (all focus on one region at a time)`);
-  console.log(`✓ Region order: ${KIJIJI_REGIONS.map(r => r.label).join(' → ')}`);
+  console.log(`✓ Scraper workers: ${SCRAPER_WORKERS}`);
+  console.log(`  Phase 1: all ${SCRAPER_WORKERS} workers → Ontario (${ON_REGIONS.length} regions)`);
+  console.log(`  Phase 2: workers 0-${BC_WORKERS - 1} → BC (${BC_REGIONS.length} regions) | workers ${BC_WORKERS}-${SCRAPER_WORKERS - 1} → Ontario continuous`);
+  console.log(`✓ ON regions: ${ON_REGIONS.map(r => r.label).join(' → ')}`);
+  console.log(`✓ BC regions: ${BC_REGIONS.map(r => r.label).join(' → ')}`);
   console.log(`✓ Rate: ${KIJIJI_RPM} RPM global gate, up to ${MAX_PAGES} pages/region, empty-stop after ${EMPTY_PAGE_STOP} empties`);
   console.log('\n  Press Ctrl+C to stop cleanly.\n');
 
@@ -789,12 +873,13 @@ async function main(): Promise<void> {
 
   const scrapers = Array.from({ length: SCRAPER_WORKERS }, (_, i) => scraperWorker(i, pool));
 
-  // When all scraper workers finish naturally (all regions swept), flip stopping so
-  // normaliser workers drain the remaining queue then exit cleanly.
-  Promise.all(scrapers).then(() => {
+  // Workers 6-7 run an infinite Ontario continuous loop in Phase 2 — they only
+  // stop on Ctrl+C. Workers 0-5 stop naturally when BC is exhausted.
+  // When workers 0-5 finish BC, signal stopping so normaliser drains and exits.
+  Promise.all(scrapers.slice(0, BC_WORKERS)).then(() => {
     if (!stopping) {
       stopping = true;
-      log('All regions scraped — draining normaliser queue then exiting…');
+      log('BC sweep complete — draining normaliser queue then exiting…');
     }
   });
 

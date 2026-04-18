@@ -1592,15 +1592,16 @@ const ALLOWED_STATUSES = new Set(['active', 'review', 'rejected']);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isValidUuid(s: string): boolean { return UUID_RE.test(s); }
 
-async function fetchAllListings(page: number, source: string, status: string): Promise<{ rows: RecentRow[]; total: number }> {
+async function fetchAllListings(page: number, source: string, status: string, province: string): Promise<{ rows: RecentRow[]; total: number }> {
   const offset = (page - 1) * PAGE_SIZE;
   const conditions: string[] = [];
   const params: unknown[] = [];
   let pi = 1;
 
   // Only apply status filter when it is a known enum value — prevents Postgres enum cast errors
-  if (source) { conditions.push(`l.source_id = $${pi++}`); params.push(source); }
+  if (source)   { conditions.push(`l.source_id = $${pi++}`); params.push(source); }
   if (status && ALLOWED_STATUSES.has(status)) { conditions.push(`l.status = $${pi++}`); params.push(status); }
+  if (province) { conditions.push(`l.province = $${pi++}`); params.push(province); }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
@@ -1622,14 +1623,15 @@ async function fetchAllListings(page: number, source: string, status: string): P
   }
 }
 
-function buildAllListingsHtml(rows: RecentRow[], total: number, page: number, source: string, status: string): string {
+function buildAllListingsHtml(rows: RecentRow[], total: number, page: number, source: string, status: string, province: string): string {
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
-  const buildLink = (p: number, src = source, st = status) => {
+  const buildLink = (p: number, src = source, st = status, prov = province) => {
     const params = new URLSearchParams();
     if (p > 1) params.set('page', String(p));
-    if (src) params.set('source', src);
-    if (st) params.set('status', st);
+    if (src)  params.set('source', src);
+    if (st)   params.set('status', st);
+    if (prov) params.set('province', prov);
     const q = params.toString();
     return `/listings${q ? '?' + q : ''}`;
   };
@@ -1670,10 +1672,12 @@ function buildAllListingsHtml(rows: RecentRow[], total: number, page: number, so
   pager += `<span style="color:#555;margin-left:8px;">${fmt(total)} total  ·  page ${page}/${totalPages}</span></div>`;
 
   // Filters
-  const filterSrc = (id: string, label: string) =>
-    `<a href="${buildLink(1, id === source ? '' : id, status)}" class="${source === id ? 'on' : ''}">${label}</a>`;
-  const filterSt = (st: string, label: string) =>
-    `<a href="${buildLink(1, source, st === status ? '' : st)}" class="${status === st ? 'on' : ''}">${label}</a>`;
+  const filterSrc  = (id: string, label: string) =>
+    `<a href="${buildLink(1, id === source ? '' : id, status, province)}" class="${source === id ? 'on' : ''}">${label}</a>`;
+  const filterSt   = (st: string, label: string) =>
+    `<a href="${buildLink(1, source, st === status ? '' : st, province)}" class="${status === st ? 'on' : ''}">${label}</a>`;
+  const filterProv = (pv: string, label: string) =>
+    `<a href="${buildLink(1, source, status, pv === province ? '' : pv)}" class="${province === pv ? 'on' : ''}">${label}</a>`;
 
   return `<!DOCTYPE html>
 <html lang="en"><head>
@@ -1696,11 +1700,19 @@ function buildAllListingsHtml(rows: RecentRow[], total: number, page: number, so
     ${filterSrc('kijiji-ca', 'KIJIJI')}
     ${filterSrc('facebook-mp-ca', 'FACEBOOK')}
     <span style="font-size:10px;color:#333;padding:4px 8px;">|</span>
+    <span style="font-size:10px;color:#555;letter-spacing:1px;padding:4px 0;">PROVINCE:</span>
+    ${filterProv('ON', 'ONTARIO')}
+    ${filterProv('BC', 'BC')}
+    ${filterProv('AB', 'ALBERTA')}
+    ${filterProv('QC', 'QUEBEC')}
+    ${filterProv('MB', 'MANITOBA')}
+    ${filterProv('SK', 'SASK')}
+    <span style="font-size:10px;color:#333;padding:4px 8px;">|</span>
     <span style="font-size:10px;color:#555;letter-spacing:1px;padding:4px 0;">STATUS:</span>
     ${filterSt('active', 'LIVE')}
     ${filterSt('review', 'REVIEW')}
     ${filterSt('rejected', 'REJECTED')}
-    ${source || status ? `<a href="/listings" style="color:#e74c3c;">✕ CLEAR</a>` : ''}
+    ${source || status || province ? `<a href="/listings" style="color:#e74c3c;">✕ CLEAR</a>` : ''}
   </div>
 
   <div class="card gray" style="padding:18px;">
@@ -2615,12 +2627,13 @@ app.get('/home', async (_req, res) => {
 // All listings
 app.get('/listings', async (req, res) => {
   try {
-    const page   = Math.max(1, parseInt(String(req.query.page ?? '1'), 10));
-    const source = String(req.query.source ?? '');
-    const status = String(req.query.status ?? '');
-    const { rows, total } = await fetchAllListings(page, source, status);
+    const page     = Math.max(1, parseInt(String(req.query.page ?? '1'), 10));
+    const source   = String(req.query.source ?? '');
+    const status   = String(req.query.status ?? '');
+    const province = String(req.query.province ?? '');
+    const { rows, total } = await fetchAllListings(page, source, status, province);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(buildAllListingsHtml(rows, total, page, source, status));
+    res.send(buildAllListingsHtml(rows, total, page, source, status, province));
   } catch (err) {
     res.status(500).send(`<pre style="background:#0d0d0d;color:#e74c3c;padding:24px;font-family:monospace;">Error: ${(err as Error).message}</pre>`);
   }
