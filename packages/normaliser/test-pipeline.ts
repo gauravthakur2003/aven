@@ -136,6 +136,8 @@ const startTime  = Date.now();
 
 /** Atomically claim the next page. Returns null when all regions are done. */
 function claimPage(): { region: Region; page: number; rIdx: number } | null {
+  // Guard: all regions already exhausted (regionIdx advanced past end on a previous call)
+  if (regionIdx >= KIJIJI_REGIONS.length) return null;
   while (emptyStreak >= EMPTY_PAGE_STOP || nextPage > MAX_PAGES) {
     regionIdx++;
     nextPage     = 1;
@@ -786,6 +788,15 @@ async function main(): Promise<void> {
   console.log('');
 
   const scrapers = Array.from({ length: SCRAPER_WORKERS }, (_, i) => scraperWorker(i, pool));
+
+  // When all scraper workers finish naturally (all regions swept), flip stopping so
+  // normaliser workers drain the remaining queue then exit cleanly.
+  Promise.all(scrapers).then(() => {
+    if (!stopping) {
+      stopping = true;
+      log('All regions scraped — draining normaliser queue then exiting…');
+    }
+  });
 
   await Promise.all([
     ...scrapers,

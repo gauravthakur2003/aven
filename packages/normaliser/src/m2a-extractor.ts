@@ -44,7 +44,10 @@ const CEREBRAS_BASE_URL     = 'https://api.cerebras.ai/v1';
 // Together AI — OpenAI-compatible, paid, serverless (no cold start).
 // Primary: Llama-3-8B-Instruct-Lite  — cheapest serverless, very fast
 // Secondary: Llama-3.3-70B-Instruct-Turbo — higher quality for trickier listings
-const TOGETHER_MODEL        = process.env.TOGETHER_MODEL     ?? 'meta-llama/Llama-3-8B-Instruct-Lite';
+// Serverless models on Together AI (pay-per-token, no dedicated deployment):
+// Meta-Llama-3-8B-Instruct-Lite: $0.10/1M tokens — fastest and cheapest
+// Llama-3.3-70B-Instruct-Turbo:  $0.88/1M tokens — highest quality
+const TOGETHER_MODEL        = process.env.TOGETHER_MODEL     ?? 'meta-llama/Meta-Llama-3-8B-Instruct-Lite';
 const TOGETHER_MODEL_BIG    = process.env.TOGETHER_MODEL_BIG ?? 'meta-llama/Llama-3.3-70B-Instruct-Turbo';
 const TOGETHER_BASE_URL     = 'https://api.together.xyz/v1';
 const MAX_TOKENS            = 1024;
