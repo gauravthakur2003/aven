@@ -97,10 +97,10 @@ const EMPTY_PAGE_STOP   = 2;     // consecutive empty pages → region done
 const WORKER_PROVIDERS = [
   'cerebras',
   'groq',
+  'groq2',   // 2nd Groq key (GROQ_API_KEY_2) — separate 14,400 RPD pool
   'gemini',
   // Together AI: 5× Llama-3-8B-Instruct-Lite — serverless, fastest, cheapest
   ...(process.env.TOGETHER_API_KEY ? ['together', 'together', 'together', 'together', 'together'] : []),
-  ...(process.env.GROQ_API_KEY_2   ? ['groq2'] : []),
 ] as const;
 const PROGRESS_EVERY   = 10;
 
