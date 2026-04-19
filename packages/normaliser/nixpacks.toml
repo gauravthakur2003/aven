@@ -1,8 +1,10 @@
-# Nixpacks config for Railway — installs Chromium dependencies for Playwright
+# Nixpacks config for Railway — uses system Chromium for Playwright
 
 [phases.setup]
 nixPkgs = [
+  "nodejs_20",
   "chromium",
+  "glib",
   "nss",
   "nspr",
   "atk",
@@ -11,15 +13,16 @@ nixPkgs = [
   "gtk3",
   "pango",
   "cairo",
-  "libxcomposite",
-  "libxdamage",
-  "libxfixes",
-  "libxrandr",
-  "libgbm",
+  "xorg.libXcomposite",
+  "xorg.libXdamage",
+  "xorg.libXfixes",
+  "xorg.libXrandr",
+  "mesa",
   "libxkbcommon",
   "alsa-lib"
 ]
 
 [variables]
-PLAYWRIGHT_BROWSERS_PATH = "/root/.cache/ms-playwright"
-PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "0"
+PLAYWRIGHT_BROWSERS_PATH = "0"
+PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1"
+PLAYWRIGHT_EXECUTABLE_PATH = "/run/current-system/sw/bin/chromium"

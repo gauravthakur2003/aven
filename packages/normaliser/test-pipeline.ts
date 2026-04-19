@@ -36,7 +36,7 @@ import * as path from 'path';
 dotenv.config({ path: path.join(__dirname, '.env'), override: true });
 
 import axios from 'axios';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID as uuidv4 } from 'crypto';
 import { getPool, closePool } from './src/lib/db';
 import { extractFields, ExtractionResult } from './src/m2a-extractor';
 import { isFastPathEligible, fastPathExtract } from './src/m2a-fast-path';
@@ -50,7 +50,11 @@ import { scrapeFacebook, FB_URL_VARIANTS } from './src/fb-scraper';
 import { runDeduplication }     from './src/deduplicator';
 import { RawPayload }            from './src/types';
 
-const PAGE_DELAY_MS  = 1_200;  // ms between Kijiji page fetches (polite scraping)
+const PAGE_DELAY_MS      = 5_000;  // base ms between Kijiji page fetches
+const PAGE_DELAY_JITTER  = 5_000;  // + random 0–5s jitter so 23 scrapers don't cluster
+const RETRY_429_MIN_MS   = 45_000; // min wait after a 429 (45s)
+const RETRY_429_JITTER   = 75_000; // + random 0–75s → total 45–120s, breaks sync loops
+// All 23 regions run in parallel, staggered 15s apart on startup (345s = ~6min spread)
 
 const KIJIJI_REGIONS = [
   // ── GTA ──────────────────────────────────────────────────
@@ -165,9 +169,17 @@ async function scraperLoop(pool: any, region: { label: string; url: string }, st
     const url = page === 1 ? region.url : `${region.url}?page=${page}`;
     let payloads: RawPayload[];
 
+    const USER_AGENTS = [
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15',
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:124.0) Gecko/20100101 Firefox/124.0',
+    ];
+    const ua = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+
     try {
       const res = await axios.get(url, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124 Safari/537.36' },
+        headers: { 'User-Agent': ua, 'Accept-Language': 'en-CA,en;q=0.9', 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' },
         timeout: 20_000,
       });
 
@@ -255,16 +267,21 @@ async function scraperLoop(pool: any, region: { label: string; url: string }, st
           } satisfies RawPayload;
         });
     } catch (err) {
-      log(`[kj:${region.label}] page ${page} failed (${(err as Error).message}) — retrying page 1`);
+      const msg = (err as Error).message ?? '';
+      const is429 = msg.includes('429') || msg.includes('Too Many');
+      const waitMs = is429
+        ? RETRY_429_MIN_MS + Math.floor(Math.random() * RETRY_429_JITTER)
+        : 8_000 + Math.floor(Math.random() * 7_000);
+      log(`[kj:${region.label}] page ${page} failed (${msg})${is429 ? ` — rate limited, waiting ${Math.round(waitMs/1000)}s` : ' — retrying'}`);
       page = 1;
-      await sleep(5_000);
+      await sleep(waitMs);
       continue;
     }
 
     if (payloads.length === 0) {
       log(`[kj:${region.label}] page ${page} empty — wrapping to page 1`);
       page = 1;
-      await sleep(PAGE_DELAY_MS);
+      await sleep(PAGE_DELAY_MS + Math.floor(Math.random() * PAGE_DELAY_JITTER));
       continue;
     }
 
@@ -272,7 +289,7 @@ async function scraperLoop(pool: any, region: { label: string; url: string }, st
     const runFresh = payloads.filter(p => !seenUrls.has(p.listing_url));
     if (runFresh.length === 0) {
       page++;
-      await sleep(PAGE_DELAY_MS);
+      await sleep(PAGE_DELAY_MS + Math.floor(Math.random() * PAGE_DELAY_JITTER));
       continue;
     }
 
@@ -296,7 +313,7 @@ async function scraperLoop(pool: any, region: { label: string; url: string }, st
     }
 
     page++;
-    await sleep(PAGE_DELAY_MS);
+    await sleep(PAGE_DELAY_MS + Math.floor(Math.random() * PAGE_DELAY_JITTER));
   }
 
   log(`[kj:${region.label}] stopped`);
@@ -606,7 +623,7 @@ async function main(): Promise<void> {
   console.log('');
 
   await Promise.all([
-    ...KIJIJI_REGIONS.map((region, i) => scraperLoop(pool, region, i * 3_000)),
+    ...KIJIJI_REGIONS.map((region, i) => scraperLoop(pool, region, i * 15_000)),
     ...(hasFbSession ? [fbScraperLoop(pool)] : []),
     dedupLoop(pool),
     ...workers,
