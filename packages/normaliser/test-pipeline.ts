@@ -86,15 +86,25 @@ const ON_REGIONS: RegionEntry[] = [
   { label: 'Toronto',         province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/city-of-toronto/c174l1700273' },
 ];
 
-// BC regions: smaller markets first → GVA (most listings) last.
+// BC regions: interior/island first → GVA sub-regions (most listings) last.
 const BC_REGIONS: RegionEntry[] = [
-  { label: 'Prince George',   province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/prince-george/c174l1700143' },
-  { label: 'Kamloops',        province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/kamloops/c174l1700227' },
-  { label: 'Kelowna',         province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/kelowna/c174l1700228' },
-  { label: 'Nanaimo',         province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/nanaimo/c174l1700263' },
-  { label: 'Victoria',        province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/victoria-bc/c174l1700173' },
-  { label: 'Fraser Valley',   province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/fraser-valley/c174l1700139' },
-  { label: 'Vancouver',       province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/vancouver/c174l1700287' },
+  // ── Interior BC ───────────────────────────────────────────
+  { label: 'Prince George',        province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/prince-george/c174l1700143' },
+  { label: 'Kamloops',             province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/kamloops/c174l1700227' },
+  { label: 'Kelowna',              province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/kelowna/c174l1700228' },
+  // ── Vancouver Island ─────────────────────────────────────
+  { label: 'Nanaimo',              province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/nanaimo/c174l1700263' },
+  { label: 'Victoria',             province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/victoria-bc/c174l1700173' },
+  // ── Fraser Valley ────────────────────────────────────────
+  { label: 'Chilliwack',           province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/chilliwack/c174l1700141' },
+  { label: 'Fraser Valley',        province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/fraser-valley/c174l1700139' },
+  // ── Greater Vancouver Area (GVA sub-regions) ─────────────
+  { label: 'North Shore',          province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/north-shore/c174l1700289' },
+  { label: 'Burnaby/New West',     province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/burnaby-new-westminster/c174l1700286' },
+  { label: 'Vancouver',            province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/vancouver/c174l1700287' },
+  { label: 'Richmond',             province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/richmond-bc/c174l1700288' },
+  { label: 'Tricities/Pitt/Maple', province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/tricities-pitt-maple/c174l1700290' },
+  { label: 'Delta/Surrey/Langley', province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/delta-surrey-langley/c174l1700285' },
 ];
 
 // ── RegionCursor: atomic page counter for a set of regions ──
