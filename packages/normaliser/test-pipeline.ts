@@ -86,21 +86,30 @@ const ON_REGIONS: RegionEntry[] = [
   { label: 'Toronto',         province: 'ON', url: 'https://www.kijiji.ca/b-cars-trucks/city-of-toronto/c174l1700273' },
 ];
 
-// BC regions: interior/island first → GVA sub-regions (most listings) last.
+// BC regions — all sub-regions confirmed from the BC provincial page (c174l9007).
+// Ordered small → large so fresh listings in smaller markets get captured first,
+// GVA sub-regions (most listings) run last.
 const BC_REGIONS: RegionEntry[] = [
-  // ── Interior BC ───────────────────────────────────────────
-  { label: 'Prince George',        province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/prince-george/c174l1700143' },
-  { label: 'Kamloops',             province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/kamloops/c174l1700227' },
-  { label: 'Kelowna',              province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/kelowna/c174l1700228' },
-  // ── Vancouver Island ─────────────────────────────────────
-  { label: 'Nanaimo',              province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/nanaimo/c174l1700263' },
-  { label: 'Victoria',             province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/victoria-bc/c174l1700173' },
-  // ── Fraser Valley ────────────────────────────────────────
-  { label: 'Chilliwack',           province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/chilliwack/c174l1700141' },
-  { label: 'Fraser Valley',        province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/fraser-valley/c174l1700139' },
-  // ── Greater Vancouver Area (GVA sub-regions) ─────────────
+  // ── Small northern / interior ─────────────────────────────
+  { label: 'Williams Lake',        province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/williams-lake/c174l1700305' },
+  { label: 'Dawson Creek',         province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/dawson-creek/c174l1700304' },
   { label: 'North Shore',          province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/north-shore/c174l1700289' },
+  { label: 'Victoria',             province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/victoria-bc/c174l1700173' },
+  { label: 'Nanaimo',              province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/nanaimo/c174l1700263' },
+  { label: 'Comox/Courtenay',      province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/comox-valley/c174l1700315' },
+  { label: 'Cowichan Valley',      province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/cowichan-valley/c174l1700300' },
+  { label: 'Terrace',              province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/terrace/c174l1700309' },
+  { label: 'Chilliwack',           province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/chilliwack/c174l1700141' },
+  // ── Mid-size interior ─────────────────────────────────────
+  { label: 'Kelowna',              province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/kelowna/c174l1700228' },
+  { label: 'Kamloops',             province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/kamloops/c174l1700227' },
+  { label: 'Cranbrook',            province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/cranbrook/c174l1700224' },
+  { label: 'Abbotsford',           province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/abbotsford/c174l1700140' },
+  { label: 'Fraser Valley',        province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/fraser-valley/c174l1700139' },
+  { label: 'Prince George',        province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/prince-george/c174l1700143' },
+  // ── GVA sub-regions (most listings) ──────────────────────
   { label: 'Burnaby/New West',     province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/burnaby-new-westminster/c174l1700286' },
+  { label: 'North Shore GVA',      province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/north-shore/c174l1700289' },
   { label: 'Vancouver',            province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/vancouver/c174l1700287' },
   { label: 'Richmond',             province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/richmond-bc/c174l1700288' },
   { label: 'Tricities/Pitt/Maple', province: 'BC', url: 'https://www.kijiji.ca/b-cars-trucks/tricities-pitt-maple/c174l1700290' },
