@@ -192,6 +192,9 @@ const PROGRESS_EVERY   = 10;
 // Phase 2: 6 workers → BC forward sweep | 2 workers → Ontario continuous loop.
 const SCRAPER_WORKERS  = 8;
 const BC_WORKERS       = 6;  // workers 0-5 → BC in Phase 2
+// Set true to skip the Ontario forward sweep and jump straight to Phase 2.
+// Workers 0-5 → BC sweep | Workers 6-7 → Ontario continuous loop.
+const SKIP_PHASE1      = true;
 
 // ── Shared state ──────────────────────────────────────────
 
@@ -569,16 +572,21 @@ async function scraperWorker(workerId: number, pool: any): Promise<void> {
   // Stagger startup by 200ms so workers don't all hit claim() simultaneously
   if (workerId > 0) await sleep(workerId * 200);
 
-  // ── Phase 1: Ontario forward sweep ───────────────────────
-  await sweepWithCursor(workerId, pool, onCursorP1);
+  // ── Phase 1: Ontario forward sweep (skipped if SKIP_PHASE1) ─
+  if (!SKIP_PHASE1) {
+    await sweepWithCursor(workerId, pool, onCursorP1);
+    if (stopping) return;
+  }
 
-  if (stopping) return;
-
-  // Coordinate the phase transition: wait until ALL Phase-1 workers are done
+  // Coordinate the phase transition
   p1DoneCount++;
   if (p1DoneCount >= SCRAPER_WORKERS) {
     log(`\n${'═'.repeat(60)}`);
-    log(`  ✓ Ontario sweep complete (${ON_REGIONS.length} regions)`);
+    if (SKIP_PHASE1) {
+      log(`  ⚡ Phase 1 skipped — jumping straight to Phase 2`);
+    } else {
+      log(`  ✓ Ontario sweep complete (${ON_REGIONS.length} regions)`);
+    }
     log(`  Phase 2: workers 0-${BC_WORKERS - 1} → BC | workers ${BC_WORKERS}-${SCRAPER_WORKERS - 1} → Ontario continuous`);
     log(`${'═'.repeat(60)}\n`);
     bcCursor   = new RegionCursor(BC_REGIONS, 'BC', false);
@@ -586,7 +594,7 @@ async function scraperWorker(workerId: number, pool: any): Promise<void> {
     currentPhase = 2;
     phase2Resolve();
   }
-  await phase2Signal; // wait until all workers have finished Phase 1
+  await phase2Signal; // wait until all workers are ready
 
   if (stopping) return;
 
