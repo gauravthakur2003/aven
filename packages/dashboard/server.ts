@@ -611,6 +611,31 @@ const SHARED_CSS = `
   .filter-bar a { font-size:10px; letter-spacing:1px; padding:4px 12px; border:1px solid #2a1a1a; border-radius:2px; color:#888; }
   .filter-bar a:hover { color:#e8e0d0; border-color:#555; }
   .filter-bar a.on { color:#e8e0d0; border-color:#c0392b; background:#1a0a0a; }
+  /* ── Admin mobile responsive ── */
+  @media (max-width:1024px) {
+    .grid4 { grid-template-columns:repeat(2,1fr); }
+  }
+  @media (max-width:768px) {
+    body { padding:12px; }
+    .grid4 { grid-template-columns:1fr 1fr; }
+    .grid3 { grid-template-columns:1fr 1fr; }
+    .grid2 { grid-template-columns:1fr; }
+    .topbar { flex-wrap:wrap; gap:8px; }
+    .topbar-nav { flex-wrap:wrap; gap:6px; }
+    .topbar-meta { display:none; }
+    .source-split { flex-direction:column; }
+    .pipeline { flex-wrap:wrap; gap:8px; justify-content:center; }
+    .pipe-arrow { display:none; }
+    .unsure-alert { flex-direction:column; align-items:flex-start; gap:10px; }
+    .footer-bar { flex-direction:column; gap:4px; }
+    .card-value { font-size:22px; }
+  }
+  @media (max-width:480px) {
+    body { padding:8px; }
+    .grid4 { grid-template-columns:1fr; }
+    .grid3 { grid-template-columns:1fr; }
+    .logo span { display:none; }
+  }
 `;
 
 // ── Homepage CSS ──────────────────────────────────────────
@@ -768,13 +793,19 @@ const HOME_CSS = `
     .h-hero-divider { display:none; }
     .h-section { padding:36px 20px; }
     .h-cats { grid-template-columns:repeat(2,1fr); }
-    .h-recent-grid { grid-template-columns:1fr; }
+    .h-recent-grid { grid-template-columns:repeat(2,1fr); }
     .h-topbar { padding:0 16px; }
-    .h-stats-bar { font-size:13px; }
+    .h-stats-bar { font-size:13px; padding:14px 16px; }
+    .h-footer { padding:20px 16px; }
   }
   @media (max-width:480px) {
+    .h-topbar { height:auto; padding:12px 16px; flex-wrap:wrap; gap:8px; }
+    .h-nav a:not(.h-btn) { display:none; }
     .h-cats { grid-template-columns:repeat(2,1fr); }
+    .h-recent-grid { grid-template-columns:1fr; }
     .h-makes-row { gap:6px; }
+    .h-headline { font-size:26px; }
+    .h-ai-headline { font-size:22px; }
   }
 `;
 
@@ -1019,11 +1050,19 @@ const BROWSE_CSS = `
     .b-filter-toggle:hover { border-color:#16a34a; color:#16a34a; }
     .b-grid { grid-template-columns:repeat(2,1fr); gap:12px; }
     .b-topbar { padding:0 16px; }
+    .b-results-bar { flex-direction:column; align-items:flex-start; gap:8px; }
+    .b-sort-select { width:100%; }
   }
   @media (max-width:480px) {
+    .b-topbar { height:auto; padding:12px 16px; flex-wrap:wrap; gap:8px; }
+    .b-nav a:not(.b-btn) { display:none; }
+    .b-hero { padding:28px 16px 24px; }
+    .b-hero-title { font-size:clamp(22px,6vw,34px); }
+    .b-hero-sub { font-size:14px; margin-bottom:20px; }
     .b-grid { grid-template-columns:1fr; }
     .b-form-card { padding:24px 18px; }
-    .b-pager a, .b-pager span { padding:8px 12px; font-size:12px; }
+    .b-pager a, .b-pager span { padding:8px 10px; font-size:12px; }
+    .b-center-wrap { margin:32px auto; }
   }
 `;
 
@@ -1396,13 +1435,13 @@ function buildDashboardHtml(s: Stats): string {
 
   <div class="topbar">
     <div class="logo">AVEN <span>COMMAND CENTER  ·  v0.4</span></div>
-    <div style="display:flex;gap:10px;align-items:center;">
+    <div class="topbar-nav" style="display:flex;gap:10px;align-items:center;">
       <a href="/" class="nav-link active">DASHBOARD</a>
       <a href="/listings" class="nav-link">ALL LISTINGS</a>
       <a href="/home" class="nav-link">BROWSE</a>
       <div class="live-pill"><div class="live-dot"></div> LIVE</div>
-      <div style="font-size:11px;color:#555;">Last sync: ${s.last_sync}</div>
-      <div style="font-size:11px;color:#555;cursor:pointer;" onclick="location.reload()">↺ REFRESH</div>
+      <div class="topbar-meta" style="font-size:11px;color:#555;">Last sync: ${s.last_sync}</div>
+      <div class="topbar-meta" style="font-size:11px;color:#555;cursor:pointer;" onclick="location.reload()">↺ REFRESH</div>
     </div>
   </div>
 
@@ -1437,7 +1476,7 @@ function buildDashboardHtml(s: Stats): string {
   </div>
 
   <!-- Source split + dedup bar -->
-  <div style="display:flex;gap:12px;margin-bottom:20px;">
+  <div class="source-split" style="display:flex;gap:12px;margin-bottom:20px;">
     <div class="card" style="flex:1;padding:14px 18px;display:flex;align-items:center;justify-content:space-between;">
       <div>
         <div class="card-label">Kijiji Canada</div>
@@ -1688,7 +1727,7 @@ function buildAllListingsHtml(rows: RecentRow[], total: number, page: number, so
 
   <div class="topbar">
     <div class="logo">AVEN <span>ALL LISTINGS  ·  ${fmt(total)} entries</span></div>
-    <div style="display:flex;gap:10px;align-items:center;">
+    <div class="topbar-nav" style="display:flex;gap:10px;align-items:center;">
       <a href="/" class="nav-link">DASHBOARD</a>
       <a href="/listings" class="nav-link active">ALL LISTINGS</a>
       <a href="/home" class="nav-link">BROWSE</a>
