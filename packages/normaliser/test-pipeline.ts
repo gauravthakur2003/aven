@@ -44,7 +44,7 @@ import { computeConfidence }     from './src/m2c-scorer';
 import { routeAndWrite }         from './src/m2e-router';
 import { detectColour }          from './src/m2g-vision';
 import { lookupCarfax }          from './src/m2f-carfax';
-import { fbNoAuthScraperLoop } from './src/fb-noauth-scraper';
+import { fbNoAuthScraperLoop, FB_CITIES, FbCity } from './src/fb-noauth-scraper';
 import { runDeduplication }     from './src/deduplicator';
 import { RawPayload }            from './src/types';
 
@@ -187,14 +187,24 @@ const WORKER_PROVIDERS = [
 ] as const;
 const PROGRESS_EVERY   = 10;
 
-// 8 scraper workers total.
-// Phase 1: all 8 sweep Ontario forward.
-// Phase 2: 6 workers → BC forward sweep | 2 workers → Ontario continuous loop.
-const SCRAPER_WORKERS  = 8;
-const BC_WORKERS       = 6;  // workers 0-5 → BC in Phase 2
-// Set true to skip the Ontario forward sweep and jump straight to Phase 2.
-// Workers 0-5 → BC sweep | Workers 6-7 → Ontario continuous loop.
+// 3 Kijiji scraper workers: 2 → BC continuous | 1 → Ontario continuous.
+// 5 FB workers run in parallel, each owning a city subset (see FB_WORKER_CITIES).
+const SCRAPER_WORKERS  = 3;
+const BC_WORKERS       = 2;  // workers 0-1 → BC | worker 2 → ON-loop
 const SKIP_PHASE1      = true;
+
+// ── FB city split across 5 parallel workers ───────────────
+// Workers 0-2 focused on Ontario (highest volume); workers 3-4 cover rest of Canada.
+const ON_CITIES  = FB_CITIES.filter(c => c.province === 'ON');
+const REST_CITIES = FB_CITIES.filter(c => c.province !== 'ON');
+
+const FB_WORKER_CITIES: FbCity[][] = [
+  ON_CITIES.slice(0, 3),                                  // Toronto, Ottawa, Hamilton
+  ON_CITIES.slice(3, 6),                                  // London, Kitchener, Windsor
+  ON_CITIES.slice(6),                                     // Barrie, Oshawa, Niagara
+  REST_CITIES.slice(0, Math.ceil(REST_CITIES.length / 2)),// Vancouver, Calgary, Edmonton
+  REST_CITIES.slice(Math.ceil(REST_CITIES.length / 2)),   // Montreal, Winnipeg
+];
 
 // ── Shared state ──────────────────────────────────────────
 
@@ -635,15 +645,24 @@ async function scraperWorker(workerId: number, pool: any): Promise<void> {
 // Runs in parallel with scraperWorker(). No session file needed.
 // Sweeps all cities × price bands continuously, pausing between sweeps.
 
-async function fbScraperLoop(pool: any): Promise<void> {
-  // Pre-load existing FB URLs so we don't re-queue them
-  const { rows: fbRows } = await pool.query(
+// Pre-load FB URLs once, shared across all workers (called once at startup)
+let fbUrlsPreloaded = false;
+async function preloadFbUrls(pool: any): Promise<void> {
+  if (fbUrlsPreloaded) return;
+  fbUrlsPreloaded = true;
+  const { rows } = await pool.query(
     `SELECT source_url FROM listings WHERE source_url LIKE '%facebook.com/marketplace/item/%'`,
   );
-  for (const row of fbRows) seenUrls.add(row.source_url as string);
-  log(`[fb] pre-loaded ${fbRows.length} existing FB URLs`);
+  for (const row of rows) seenUrls.add(row.source_url as string);
+  log(`[fb] pre-loaded ${rows.length} existing FB URLs`);
+}
 
-  for await (const payload of fbNoAuthScraperLoop(seenUrls, log, () => stopping)) {
+async function fbScraperLoop(pool: any, cities: FbCity[], workerId: number): Promise<void> {
+  await preloadFbUrls(pool);
+  const label = cities.map(c => c.label).join('+');
+  log(`[fb-${workerId}] starting — cities: ${label}`);
+
+  for await (const payload of fbNoAuthScraperLoop(seenUrls, log, () => stopping, cities)) {
     if (stopping) break;
 
     while (queue.length >= QUEUE_MAX && !stopping) {
@@ -656,7 +675,7 @@ async function fbScraperLoop(pool: any): Promise<void> {
     stats.queued++;
   }
 
-  log('[fb] scraper stopped');
+  log(`[fb-${workerId}] stopped`);
 }
 
 // ── Normaliser worker ─────────────────────────────────────
@@ -886,7 +905,10 @@ async function main(): Promise<void> {
     normaliserWorker(i, getPool(), provider),
   );
 
-  console.log('✓ Facebook Marketplace: enabled (no-auth scraper)');
+  console.log(`✓ Facebook Marketplace: ${FB_WORKER_CITIES.length} parallel workers`);
+  FB_WORKER_CITIES.forEach((cities, i) =>
+    console.log(`  FB worker ${i}: ${cities.map(c => c.label).join(', ')}`),
+  );
   console.log('');
 
   const scrapers = Array.from({ length: SCRAPER_WORKERS }, (_, i) => scraperWorker(i, pool));
@@ -894,9 +916,11 @@ async function main(): Promise<void> {
   // All scraper workers now run continuously (both BC and ON-loop are continuous=true).
   // Pipeline only stops on Ctrl+C — never exits on its own.
 
+  const fbWorkers = FB_WORKER_CITIES.map((cities, i) => fbScraperLoop(pool, cities, i));
+
   await Promise.all([
     ...scrapers,
-    fbScraperLoop(pool),
+    ...fbWorkers,
     dedupLoop(pool),
     ...workers,
   ]);

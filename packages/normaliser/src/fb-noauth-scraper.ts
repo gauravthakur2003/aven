@@ -19,17 +19,27 @@ import { randomUUID as uuidv4 } from 'crypto';
 import { RawPayload } from './types';
 
 // ── Cities to scrape ─────────────────────────────────────
-const FB_CITIES = [
-  { label: 'Toronto',     slug: 'toronto',      province: 'ON' },
-  { label: 'Ottawa',      slug: 'ottawa',       province: 'ON' },
-  { label: 'Hamilton',    slug: 'hamilton',     province: 'ON' },
-  { label: 'London ON',   slug: 'london-on',    province: 'ON' },
-  { label: 'Vancouver',   slug: 'vancouver',    province: 'BC' },
-  { label: 'Calgary',     slug: 'calgary',      province: 'AB' },
-  { label: 'Edmonton',    slug: 'edmonton',     province: 'AB' },
-  { label: 'Montreal',    slug: 'montreal',     province: 'QC' },
-  { label: 'Winnipeg',    slug: 'winnipeg',     province: 'MB' },
-] as const;
+export interface FbCity { label: string; slug: string; province: string; }
+
+export const FB_CITIES: FbCity[] = [
+  // Ontario — 9 cities
+  { label: 'Toronto',     slug: 'toronto',             province: 'ON' },
+  { label: 'Ottawa',      slug: 'ottawa',              province: 'ON' },
+  { label: 'Hamilton',    slug: 'hamilton',            province: 'ON' },
+  { label: 'London ON',   slug: 'london-on',           province: 'ON' },
+  { label: 'Kitchener',   slug: 'kitchener-waterloo',  province: 'ON' },
+  { label: 'Windsor',     slug: 'windsor-on',          province: 'ON' },
+  { label: 'Barrie',      slug: 'barrie',              province: 'ON' },
+  { label: 'Oshawa',      slug: 'oshawa',              province: 'ON' },
+  { label: 'Niagara',     slug: 'st-catharines',       province: 'ON' },
+  // West
+  { label: 'Vancouver',   slug: 'vancouver',           province: 'BC' },
+  { label: 'Calgary',     slug: 'calgary',             province: 'AB' },
+  { label: 'Edmonton',    slug: 'edmonton',            province: 'AB' },
+  // East
+  { label: 'Montreal',    slug: 'montreal',            province: 'QC' },
+  { label: 'Winnipeg',    slug: 'winnipeg',            province: 'MB' },
+];
 
 // ── Price bands — overlap intentionally to catch listings near boundaries ──
 const FB_PRICE_BANDS = [
@@ -295,6 +305,7 @@ export async function* fbNoAuthScraperLoop(
   seenUrls: Set<string>,
   log: (msg: string) => void,
   isStopping: () => boolean,
+  cities: FbCity[] = FB_CITIES,
 ): AsyncGenerator<RawPayload> {
   const DETAIL_DELAY_MS   = 1_200;  // between detail page fetches
   const GRID_DELAY_MS     = 3_000;  // between grid page fetches
@@ -306,7 +317,7 @@ export async function* fbNoAuthScraperLoop(
     sweepCount++;
     let sweepNew = 0;
 
-    for (const city of FB_CITIES) {
+    for (const city of cities) {
       if (isStopping()) break;
 
       for (const band of FB_PRICE_BANDS) {
@@ -351,7 +362,8 @@ export async function* fbNoAuthScraperLoop(
       }
     }
 
-    log(`[fb-noauth] Sweep ${sweepCount} complete — ${sweepNew} new listings. Pausing ${SWEEP_PAUSE_MS / 60000}min…`);
+    const cityNames = cities.map(c => c.label).join('+');
+    log(`[fb:${cityNames}] Sweep ${sweepCount} complete — ${sweepNew} new listings. Pausing ${SWEEP_PAUSE_MS / 60000}min…`);
     if (!isStopping()) {
       await new Promise(r => setTimeout(r, SWEEP_PAUSE_MS));
     }
