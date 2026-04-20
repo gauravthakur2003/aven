@@ -18,6 +18,20 @@ import axios from 'axios';
 import { randomUUID as uuidv4 } from 'crypto';
 import { RawPayload } from './types';
 
+// ── Residential proxy (required on Railway — FB blocks datacenter IPs) ────────
+// Set FB_PROXY_URL in Railway env vars, e.g.:
+//   http://user:pass@proxy.example.com:8080
+// Supports Webshare, PacketStream, Bright Data, or any HTTP/HTTPS proxy.
+const FB_PROXY_URL = process.env.FB_PROXY_URL ?? null;
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const proxyAgent = FB_PROXY_URL ? new (require('https-proxy-agent').HttpsProxyAgent)(FB_PROXY_URL) : undefined;
+if (FB_PROXY_URL) {
+  const masked = FB_PROXY_URL.replace(/:\/\/[^@]+@/, '://*****@');
+  console.log(`[fb] Using residential proxy: ${masked}`);
+} else {
+  console.log('[fb] No FB_PROXY_URL set — FB requests go direct (will fail on Railway)');
+}
+
 // ── Cities to scrape ─────────────────────────────────────
 export interface FbCity { label: string; slug: string; province: string; }
 
@@ -90,7 +104,7 @@ async function discoverListingIds(
   priceBandParams: string,
 ): Promise<string[]> {
   const url = `https://www.facebook.com/marketplace/${citySlug}/vehicles?sortBy=creation_time_descend${priceBandParams}`;
-  const res = await axios.get(url, { headers: BASE_HEADERS, timeout: 20_000, maxRedirects: 3 });
+  const res = await axios.get(url, { headers: BASE_HEADERS, timeout: 20_000, maxRedirects: 3, ...(proxyAgent ? { httpsAgent: proxyAgent, proxy: false } : {}) });
   const html = res.data as string;
 
   const allIds = new Set<string>();
@@ -247,6 +261,7 @@ async function fetchListingDetail(
       headers: BASE_HEADERS,
       timeout: 20_000,
       maxRedirects: 3,
+      ...(proxyAgent ? { httpsAgent: proxyAgent, proxy: false } : {}),
     });
     const parsed = parseDetailPage(res.data as string, listingId);
     if (!parsed) return null;
