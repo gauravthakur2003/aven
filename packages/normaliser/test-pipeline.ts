@@ -26,7 +26,7 @@
  * Prerequisites:
  *   - DATABASE_URL set in .env
  *   - At least one LLM API key set (CEREBRAS_API_KEY, GROQ_API_KEY, GEMINI_API_KEY)
- *   - For Facebook: run `npx ts-node fb-auth-setup.ts` first to create fb-session.json
+ *   - Facebook: no setup needed — no-auth scraper runs automatically
  */
 
 import * as dotenv from 'dotenv';
@@ -44,7 +44,7 @@ import { computeConfidence }     from './src/m2c-scorer';
 import { routeAndWrite }         from './src/m2e-router';
 import { detectColour }          from './src/m2g-vision';
 import { lookupCarfax }          from './src/m2f-carfax';
-import { scrapeFacebook, FB_URL_VARIANTS } from './src/fb-scraper';
+import { fbNoAuthScraperLoop } from './src/fb-noauth-scraper';
 import { runDeduplication }     from './src/deduplicator';
 import { RawPayload }            from './src/types';
 
@@ -174,7 +174,7 @@ const QUEUE_MAX      = 800;    // max pending payloads before scraper pauses
 const QUEUE_PAUSE_MS = 1_000;
 
 const MAX_PAGES         = 100;   // Kijiji hard limit per region
-const EMPTY_PAGE_STOP   = 2;     // consecutive empty pages → region done
+const EMPTY_PAGE_STOP   = 4;     // consecutive truly-empty pages → region done (raised from 2)
 
 // 8 workers: 1× Cerebras, 1× Groq, 1× Gemini, 5× Together AI (if key set)
 const WORKER_PROVIDERS = [
@@ -233,6 +233,15 @@ process.on('SIGINT', () => {
     process.stdout.write('\n');
     log('Ctrl+C — draining queue then stopping…');
   }
+});
+
+// Prevent unhandled promise rejections from crashing the process.
+// Individual workers already catch their own errors — this is a last-resort safety net.
+process.on('unhandledRejection', (reason) => {
+  log(`[WARN] Unhandled rejection (process kept alive): ${String(reason).slice(0, 200)}`);
+});
+process.on('uncaughtException', (err) => {
+  log(`[WARN] Uncaught exception (process kept alive): ${err.message.slice(0, 200)}`);
 });
 
 // ── Global Kijiji rate gate ───────────────────────────────
@@ -423,8 +432,23 @@ async function sweepWithCursor(workerId: number, pool: any, cursor: RegionCursor
         timeout: 20_000,
       });
 
-      const scriptMatch = (res.data as string).match(/<script id="__NEXT_DATA__"[^>]*>(.*?)<\/script>/s);
-      if (!scriptMatch) { cursor.report(rIdx, 0); continue; }
+      const html = res.data as string;
+      const scriptMatch = html.match(/<script id="__NEXT_DATA__"[^>]*>(.*?)<\/script>/s);
+      if (!scriptMatch) {
+        // Distinguish a Kijiji block/captcha (short page, no content) from a genuine empty
+        const isBlocked = html.length < 15_000
+          || html.includes('captcha')
+          || html.includes('g-recaptcha')
+          || !html.includes('kijiji.ca');
+        if (isBlocked) {
+          log(`[scraper-${workerId}] ${region.label} p${page} — BLOCKED (${html.length}B, no NEXT_DATA). Backing off 3min…`);
+          cursor.report(rIdx, 1); // don't advance cursor — retry after backoff
+          await sleep(180_000 + Math.floor(Math.random() * 60_000));
+        } else {
+          cursor.report(rIdx, 0); // genuinely no content on this page
+        }
+        continue;
+      }
 
       const apollo = (JSON.parse(scriptMatch[1]) as any)?.props?.pageProps?.__APOLLO_STATE__ as Record<string, unknown>;
       if (!apollo) { cursor.report(rIdx, 0); continue; }
@@ -589,7 +613,7 @@ async function scraperWorker(workerId: number, pool: any): Promise<void> {
     }
     log(`  Phase 2: workers 0-${BC_WORKERS - 1} → BC | workers ${BC_WORKERS}-${SCRAPER_WORKERS - 1} → Ontario continuous`);
     log(`${'═'.repeat(60)}\n`);
-    bcCursor   = new RegionCursor(BC_REGIONS, 'BC', false);
+    bcCursor   = new RegionCursor(BC_REGIONS, 'BC', true);   // continuous — loops forever
     onCursorP2 = new RegionCursor(ON_REGIONS, 'ON-loop', true);
     currentPhase = 2;
     phase2Resolve();
@@ -607,52 +631,29 @@ async function scraperWorker(workerId: number, pool: any): Promise<void> {
   log(`[scraper-${workerId}] Phase 2 done — exiting`);
 }
 
-// ── Facebook Marketplace scraper loop ─────────────────────
-// Runs in parallel with scraperWorker(). Restarts automatically after each
-// session ends (FB limits scrolls per session), until stopping = true.
+// ── Facebook Marketplace no-auth scraper loop ─────────────
+// Runs in parallel with scraperWorker(). No session file needed.
+// Sweeps all cities × price bands continuously, pausing between sweeps.
 
 async function fbScraperLoop(pool: any): Promise<void> {
-  let variantIdx = 0;
+  // Pre-load existing FB URLs so we don't re-queue them
+  const { rows: fbRows } = await pool.query(
+    `SELECT source_url FROM listings WHERE source_url LIKE '%facebook.com/marketplace/item/%'`,
+  );
+  for (const row of fbRows) seenUrls.add(row.source_url as string);
+  log(`[fb] pre-loaded ${fbRows.length} existing FB URLs`);
 
-  while (!stopping) {
-    const currentVariant = FB_URL_VARIANTS[variantIdx % FB_URL_VARIANTS.length];
-    variantIdx++;
+  for await (const payload of fbNoAuthScraperLoop(seenUrls, log, () => stopping)) {
+    if (stopping) break;
 
-    const { rows: fbRows } = await pool.query(
-      `SELECT source_url FROM listings WHERE source_url LIKE '%facebook.com/marketplace/item/%'`,
-    );
-    for (const row of fbRows) seenUrls.add(row.source_url as string);
-
-    log(`[fb] Starting session: ${currentVariant.label} (variant ${variantIdx}/${FB_URL_VARIANTS.length})`);
-    let sessionYielded = 0;
-
-    try {
-      for await (const payload of scrapeFacebook(seenUrls, log, () => stopping, currentVariant)) {
-        if (stopping) break;
-
-        while (queue.length >= QUEUE_MAX && !stopping) {
-          await sleep(QUEUE_PAUSE_MS);
-        }
-        if (stopping) break;
-
-        queue.push(payload);
-        stats.scraped++;
-        stats.queued++;
-        sessionYielded++;
-
-        if (sessionYielded % 20 === 0) {
-          log(`[fb] session: ${sessionYielded} listings queued so far`);
-        }
-      }
-    } catch (err) {
-      log(`[fb] session error: ${(err as Error).message}`);
+    while (queue.length >= QUEUE_MAX && !stopping) {
+      await sleep(QUEUE_PAUSE_MS);
     }
+    if (stopping) break;
 
-    if (!stopping) {
-      const restartDelay = sessionYielded > 0 ? 5_000 : 2_000;
-      log(`[fb] session done (${sessionYielded} listings). Next variant in ${restartDelay / 1000}s...`);
-      await sleep(restartDelay);
-    }
+    queue.push(payload);
+    stats.scraped++;
+    stats.queued++;
   }
 
   log('[fb] scraper stopped');
@@ -885,34 +886,17 @@ async function main(): Promise<void> {
     normaliserWorker(i, getPool(), provider),
   );
 
-  const fbEnabled = process.env.FB_ENABLED === 'true';
-  const hasFbSession = fbEnabled && (
-    require('fs').existsSync(require('path').join(__dirname, 'fb-session.json'))
-    || !!process.env.FB_STORAGE_STATE
-  );
-
-  if (hasFbSession) {
-    console.log('✓ Facebook Marketplace: enabled');
-  } else {
-    console.log('  Facebook Marketplace: disabled (set FB_ENABLED=true to re-enable)');
-  }
+  console.log('✓ Facebook Marketplace: enabled (no-auth scraper)');
   console.log('');
 
   const scrapers = Array.from({ length: SCRAPER_WORKERS }, (_, i) => scraperWorker(i, pool));
 
-  // Workers 6-7 run an infinite Ontario continuous loop in Phase 2 — they only
-  // stop on Ctrl+C. Workers 0-5 stop naturally when BC is exhausted.
-  // When workers 0-5 finish BC, signal stopping so normaliser drains and exits.
-  Promise.all(scrapers.slice(0, BC_WORKERS)).then(() => {
-    if (!stopping) {
-      stopping = true;
-      log('BC sweep complete — draining normaliser queue then exiting…');
-    }
-  });
+  // All scraper workers now run continuously (both BC and ON-loop are continuous=true).
+  // Pipeline only stops on Ctrl+C — never exits on its own.
 
   await Promise.all([
     ...scrapers,
-    ...(hasFbSession ? [fbScraperLoop(pool)] : []),
+    fbScraperLoop(pool),
     dedupLoop(pool),
     ...workers,
   ]);

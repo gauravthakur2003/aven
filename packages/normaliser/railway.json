@@ -5,7 +5,6 @@
   },
   "deploy": {
     "startCommand": "npm run pipeline",
-    "restartPolicyType": "ON_FAILURE",
-    "restartPolicyMaxRetries": 5
+    "restartPolicyType": "ALWAYS"
   }
 }
