@@ -4,7 +4,9 @@
 //
 // Tier 1 (exact):  same VIN                                          → definite duplicate
 // Tier 2 (strong): year + make + model + mileage ±3% + price ±10% + city → very likely
-// Tier 3 (weak):   year + make + model + price ±15% + city           → possible (review)
+// Tier 3 (weak):   same year/make/model/city, decided by a signal cascade
+//                  (VIN → mileage → colour → trim → price). A differing VIN or >5%
+//                  mileage gap means "different car" — never grouped. → possible (review)
 
 import { Pool, PoolClient } from 'pg';
 
@@ -24,10 +26,11 @@ export interface DuplicateStats {
   tier1_groups: number; tier2_groups: number; tier3_groups: number;
 }
 
-interface ListingRow {
+export interface ListingRow {
   id: string; source_id: string; source_url: string; vin: string | null;
   make: string; model: string; year: number; mileage_km: number | null;
   price: number | null; city: string; confidence_score: number; canonical_id: string | null;
+  colour_exterior: string | null; trim: string | null;
 }
 
 type Tier = 1 | 2 | 3;
@@ -54,6 +57,16 @@ function normaliseVin(vin: string | null): string | null {
   return v.length === 17 ? v : null;
 }
 function normaliseMakeModel(s: string): string { return s.toLowerCase().trim().replace(/\s+/g, ' '); }
+function normaliseColour(c: string | null): string | null {
+  if (!c) return null;
+  const v = c.toLowerCase().trim().replace(/[^a-z]/g, '');
+  return v && v !== 'unknown' ? v : null;
+}
+function normaliseTrim(t: string | null): string | null {
+  if (!t) return null;
+  const v = t.toLowerCase().trim().replace(/\s+/g, ' ');
+  return v && v !== 'unknown' ? v : null;
+}
 
 // ─────────────────────────── Matching logic ───────────────────────────────────
 
@@ -76,13 +89,34 @@ function isTier2Match(a: ListingRow, b: ListingRow): boolean {
   return true;
 }
 
-function isTier3Match(a: ListingRow, b: ListingRow): boolean {
+// Tier 3 (weak): two listings of the SAME year/make/model/city that are *probably* the
+// same physical car. Decided by a signal cascade (strongest available signal wins):
+//   1. VIN       — authoritative. Both present → same car IFF VINs equal. Different VIN
+//                  is a hard "different car" (this was the bug: tier-3 used to ignore VIN
+//                  and group two distinct cars that merely shared model/price/city).
+//   2. mileage   — VIN missing on either side → odometers must be within 5%, else distinct.
+//   3. colour    — both known and different → distinct cars.
+//   4. trim      — both known and different → distinct cars.
+//   5. price     — must be within 15% (same spec/generation sanity).
+// Only when nothing in the cascade disqualifies do we treat the pair as a possible dup.
+export function isTier3Match(a: ListingRow, b: ListingRow): boolean {
   if (a.year !== b.year) return false;
   if (normaliseMakeModel(a.make) !== normaliseMakeModel(b.make)) return false;
   if (normaliseMakeModel(a.model) !== normaliseMakeModel(b.model)) return false;
   if (normaliseCity(a.city) !== normaliseCity(b.city)) return false;
+
+  // 1. VIN is decisive when both are present.
+  const va = normaliseVin(a.vin), vb = normaliseVin(b.vin);
+  if (va && vb) return va === vb;
+
+  // 2..5 — VIN missing on at least one side: fall back through the cascade.
   if (a.price == null || b.price == null) return false;
   if (!withinPct(a.price, b.price, 15)) return false;
+  if (a.mileage_km != null && b.mileage_km != null && !withinPct(a.mileage_km, b.mileage_km, 5)) return false;
+  const ca = normaliseColour(a.colour_exterior), cb = normaliseColour(b.colour_exterior);
+  if (ca && cb && ca !== cb) return false;
+  const ta = normaliseTrim(a.trim), tb = normaliseTrim(b.trim);
+  if (ta && tb && ta !== tb) return false;
   return true;
 }
 
@@ -249,6 +283,7 @@ export async function runDeduplication(pool: Pool, log: (msg: string) => void): 
         trim(vin)   AS vin,
         make, model, year,
         mileage_km, price, city,
+        colour_exterior, trim,
         confidence_score,
         canonical_id
       FROM listings
