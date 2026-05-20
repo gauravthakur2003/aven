@@ -46,6 +46,7 @@ import { detectColour }          from './src/m2g-vision';
 import { lookupCarfax }          from './src/m2f-carfax';
 import { fbNoAuthScraperLoop, FB_CITIES, FbCity } from './src/fb-noauth-scraper';
 import { runDeduplication }     from './src/deduplicator';
+import { livenessLoop }         from './src/liveness-checker';
 import { RawPayload }            from './src/types';
 
 const RETRY_429_MIN_MS   = 90_000; // min wait after a 429 (90s)
@@ -922,6 +923,7 @@ async function main(): Promise<void> {
     ...scrapers,
     ...fbWorkers,
     dedupLoop(pool),
+    livenessLoop(pool, (msg: string) => log(msg), () => stopping),
     ...workers,
   ]);
 

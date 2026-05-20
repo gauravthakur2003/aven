@@ -81,9 +81,15 @@ export function hardRejectReason(fields: ValidatedFields, noImages: boolean): st
   // Why: a listing without photos has near-zero consumer click-through rate.
   // FB and Kijiji listings without images are typically spam or placeholder posts.
   if (noImages) return 'NO_IMAGES';
-  // Why: price is the #1 consumer filter. A listing with no price AND no payment
-  // terms (dealer financing) cannot be sorted or compared — not useful in our index.
-  if (fields.price == null && fields.payment_amount == null) return 'NO_PRICE_OR_PAYMENT';
+  // Why: price is the #1 consumer filter and is MANDATORY (product rule). A purchase
+  // price must be present by this stage — the extractor already attempts to recover it
+  // from the description / payment terms. A payment-only listing (no derivable purchase
+  // price) cannot be sorted or compared, so it is rejected rather than held.
+  if (fields.price == null) return 'NO_PRICE';
+  // Why: mileage is MANDATORY (product rule: "no mileage, no listing"). It is the second
+  // strongest trust/value signal for a used car. By this stage the extractor has already
+  // tried the structured fields and the description; a still-missing odometer = reject.
+  if (fields.mileage_km == null) return 'NO_MILEAGE';
   return null;
 }
 
